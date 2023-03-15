@@ -4,40 +4,246 @@ Script to load data about births to a postgres database
 
 NOTE
 I've removed incorrect headers on these files for a clean load to a data frame.
+Source: https://web.archive.org/web/20181107034101/https://www.phila.gov/health/Commissioner/VitalStatistics.html
 
+Before runnin this script, you need to create the database and schemas.
+In the database, don't forget CREATE EXTENSION postgis;
+Create sdp.sdp and
+       sdp.census
+(or change the variables below)
 """
 
+import openpyxl
 import os
-import re
 import pandas
+import re
 from sqlalchemy import create_engine
+import subprocess
+from tqdm import tqdm
+import urllib.request
+import zipfile
 
 
-births_path = os.path.join("data", "births")
-births_files = list(filter(lambda f: re.search(r"\.csv$", f), os.listdir(births_path)))
+def get_csvs(file_path):
+    return list(filter(lambda f: re.search(r"\.csv$", f), os.listdir(file_path)))
 
 def clean_col(col: str):
     col = col.lower()
     col = col.replace('<', '')
     col = col.replace(',', '')
     col = col.replace('.', '')
+    col = col.replace('-', '_')
+    col = col.replace('#', '')
+    col = col.replace('%', '')
+    col = col.replace('  ', '_')
+    col = col.strip()
     col = col.replace(' ', '_')
     return col
 
 def main():
     user = input('user: ')
-    pw = input('password: ')
-    engine = create_engine(f"postgresql+psycopg2://{user}:{pw}@localhost:5432/sdp")
-    for births_file in births_files:
-        table_name = 'births_' + births_file[0:4]
+    #pw = input('password: ')
+    db = 'sdp'
+    census_schema = 'census'
+    sdp_schema = 'sdp'
+    engine = create_engine(f"postgresql+psycopg2://{user}@localhost:5432/{db}")
+
+    print("Loading births files...")
+    births_path = os.path.join('..',"data", "births")
+    births_files = get_csvs(births_path)
+    for births_file in tqdm(births_files):
+        year = births_file[0:4]
         df = pandas.read_csv(os.path.join(births_path, births_file))
+        df.insert(0, 'census_year', year)
         df.rename(columns=clean_col, inplace=True)
+
+        table_name = f'births_{year}'
         df.to_sql(
             name=table_name,
             con=engine,
             schema='census',
             if_exists='replace',
         )
+
+    print("Loading school district demographics files...")
+    # All demog data will live in one directory
+    demog_data_path = os.path.join('..', 'data', 'schools', 'demog')
+    
+    # load student demog data in csv format
+    demog_csv_url = "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/Enrollment_Demographics_School/{year}%20Enrollment%20&%20Demographics.csv"
+
+    demog_years_csv = [
+        '2019-2020',
+    ]
+
+    for year in tqdm(demog_years_csv):
+        url = demog_csv_url.format(year=year)
+        download_file = f'{year}_Enrollment_Demographics.csv'
+        download_path = os.path.join(demog_data_path, download_file)
+        urllib.request.urlretrieve(url, download_path)
+        table_name = clean_col(f'schools_demog_{year}')
+        df = pandas.read_csv(
+            download_path,
+            sep=',',
+            )
+        df.rename(columns=clean_col, inplace=True)
+        df.to_sql(
+            name=table_name,
+            con=engine,
+            schema='sdp',
+            if_exists='replace',
+        )
+
+    # load student demog data from xlsx format
+    demog_xlsx_url = 'https://cdn.philasd.org/offices/performance/Open_Data/School_Information/Enrollment_Demographics_School/{year}%20Enrollment%20&%20Demographics.xlsx'
+
+    # load data in clean format first
+    demog_years_xlsx = [
+        '2018-2019',
+    ]
+
+    for year in tqdm(demog_years_xlsx):
+        url = demog_xlsx_url.format(year=year)
+        download_file = f'{year}_Enrollment_Demographics.xlsx'
+        download_path = os.path.join(demog_data_path, download_file)
+        urllib.request.urlretrieve(url, download_path)
+
+        workbook = openpyxl.load_workbook(download_path)
+        worksheet = workbook['Sheet1']
+        data = worksheet.values
+        cols = next(data)[0:]
+        data = list(data)
+        df = pandas.DataFrame(data, columns=cols)
+
+        table_name = clean_col(f'schools_demog_{year}')
+        df.rename(columns=clean_col, inplace=True)
+        df.to_sql(
+            name=table_name,
+            con=engine,
+            schema='sdp',
+            if_exists='replace',
+        )
+
+    demog_years_xlsx = [
+        '2017-2018',
+        '2016-2017',
+    ]
+
+    for year in tqdm(demog_years_xlsx):
+        url = demog_xlsx_url.format(year=year)
+        download_file = f'{year}_Enrollment_Demographics.xlsx'
+        download_path = os.path.join(demog_data_path, download_file)
+        urllib.request.urlretrieve(url, download_path)
+
+        workbook = openpyxl.load_workbook(download_path)
+
+        # process sheet(s) we need
+
+        # Ethnicity
+        ethnicity = workbook['Ethnicity'].values
+        # skip 4 lines
+        for i in range(4):
+            next(ethnicity)
+        subtabs = next(ethnicity)[1:21]
+        ethnicity_cols = list(next(ethnicity)[1:21])
+        # match subtabs to columns to build something like "Hispanic_percent"
+        for label_idx, label in enumerate(subtabs):
+            if label:
+                for col_idx in range(len(ethnicity_cols)):
+                    if (col_idx - 1) // 2 == (label_idx) // 2:
+                        ethnicity_cols[col_idx] = label.split('\n')[0] + '_' + ethnicity_cols[col_idx]
+        ethnicity = [r[1:21] for r in list(ethnicity)]
+
+        df_ethnicity = pandas.DataFrame(ethnicity, columns=ethnicity_cols)
+        df_ethnicity.rename(columns=clean_col, inplace=True)
+        # if we merge to another sheet, remove duplicate columns to avoid muddled names
+        #df_ethnicity = df_ethnicity.drop(columns=['total_enrolled', 'learning_network', 'school_name'])
+
+        # merge both dataframes together so we only load one table
+        #df = pandas.merge(something, df_ethnicity, how='left', on=['school_id', 'grade'])
+        df = df_ethnicity
+        df .insert(0, 'school_year', year)
+
+        table_name = clean_col(f'schools_demog_{year}')
+        df.to_sql(
+            name=table_name,
+            con=engine,
+            schema='sdp',
+            if_exists='replace',
+        )
+
+    print("Processing census tract files...")
+
+    tract_years = [
+        '2011',
+        '2012',
+        '2013',
+        '2014',
+    ]
+
+    for year in tqdm(tract_years):
+        subprocess.run(
+            [
+                'ogr2ogr',
+                '-f', 'PostgreSQL',
+                f'Pg:dbname={db} host=localhost port=5432 user={user}',
+                '-lco', f'SCHEMA={census_schema}',
+                '-lco', 'OVERWRITE=YES',
+                '-nlt', 'PROMOTE_TO_MULTI',
+                '-where', "countyfp = \'101\'",
+                '-t_srs', 'EPSG:2272',
+                f"/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER{year}/TRACT/tl_{year}_42_tract.zip"
+            ],
+            check=True,
+        )
+
+    print(f'Process sdp catchment shape files...') 
+    catchment_years = [
+        '1617',
+        '1718',
+        '1819',
+        '1920',
+    ]
+
+    # download the zip file with everything in it
+    sdp_shapes_url = 'https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_Catchment/SDP_Catchment_All_Years.zip'
+    sdp_data_path = os.path.join('..', 'data', 'schools')
+    sdp_shapes_path = os.path.join(sdp_data_path, os.path.basename(sdp_shapes_url))
+    urllib.request.urlretrieve(sdp_shapes_url, sdp_shapes_path)
+
+    # unzip the file with all years of shapes
+    unzip_dir = os.path.basename(sdp_shapes_url).rstrip('.zip')
+    unzip_path = os.path.join(sdp_data_path, unzip_dir)
+    with zipfile.ZipFile(sdp_shapes_path, 'r') as f:
+        f.extractall(unzip_path)
+
+    for year in tqdm(catchment_years):
+
+        # extract the files for that catchment year
+        current_file_name = f'SDP_Catchment_{year}.zip'
+        current_unzip_path = os.path.join(unzip_path, current_file_name.rstrip('.zip'))
+        with zipfile.ZipFile(os.path.join(unzip_path, current_file_name)) as f:
+            f.extractall(current_unzip_path)
+        
+        # then load the shapefiles
+        subprocess.run(
+            [
+                'ogr2ogr',
+                '-f', 'PostgreSQL',
+                f'Pg:dbname={db} host=localhost port=5432 user={user}',
+                '-lco', f'SCHEMA={sdp_schema}',
+                '-lco', 'OVERWRITE=YES',
+                '-nlt', 'PROMOTE_TO_MULTI',
+                '-t_srs', 'EPSG:2272',
+                '-lco', 'precision=NO',
+                os.path.join(
+                    current_unzip_path,
+                    f'Catchment_ES_20{year[0:2]}-{year[2:4]}',
+                    f'Catchment_ES_20{year[0:2]}.shp')
+            ],
+            check=True,
+        )
+
     engine.dispose()
 
 if __name__ == '__main__':

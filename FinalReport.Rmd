@@ -1,0 +1,98 @@
+---
+title: "Final Project"
+author: "Eric Peterson"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+## Aims
+
+Identify demographic qualities of census tracts associated with higher rates of converting live birth statistics five years ago to current kindergarten enrollments.
+
+## Background
+
+School districts face uncertainty planning for their kindergarten enrollment. In the School District of Philadelphia (SDP) and other school systems starved of resources, planning is important to allocate limited budgets. Where localized birth datasets can be available to decisionmakers, analysts notice variable conversion of those births to kindergarten enrollments five years later. Competition for resources can motivate stakeholders invested in retaining resources at individual schools to make optimistic assumptions about kindergarten enrollment. An impartial, rigorous approach can identify variables correlated to greater participation in kindergarten enrollment and drive equitable allocation of resources.
+
+## Hypotheses
+
+I expect that families in catchments with higher socioeconomic status will opt out of SDP public schools.
+Catchments with higher percentage white population will have worse conversion.
+Catchments with greater variance in household income will have worse conversion.
+
+## Methods
+
+Data will be a few years old, specific years available through internet archives.
+
+Catchment boundaries each year are available through SDP. Enrollment data is available through SDP.
+
+I'll use PostGIS to aggregate catchment-level summaries of census tract data through the ACS and the live births data. This will focus on summarizing the live births data, white percent population, and household income.
+
+I'll use the available SDP enrollment data to find the number of students from each catchment enrolled in SDP kindergarten. (area weighted interpolation) I'll use that enrollment to compute the conversion rate.
+
+I'll be comparing this conversion rate of the catchment to the household income and proportions of population by race.
+
+Each of the catchments is effectively one sample. I'll run our statistical analysis on the set of samples for each year.
+
+TODO Download and join the census/ACS data at the lowest granularity that demographic data is available.
+
+
+## Pipeline
+
+A summary so far:
+
+1. In a python script, load local births files to PostGIS
+2. In a python script, download remote enrollment files and load those local files to PostGIS (3 formats)
+3. In a python script, write remote census tract shapes for Philadelphia county to PostGIS
+4. In a python script, download, unzip, then write local catchment shapes for School District of Philadelphia to PostGIS
+5. In a sql script,
+  * Union all census tract years together
+  * Union all catchment years together
+  * Join tracts and catchments to build the intersections of the two. Compute the ratio of each tract in each catchment.
+  * Union all birth years together
+  * Join births to the intersection of tracts and catchments. Multiply the births in catchment by the ratio of area in each tract. Sum the area-weighted births by catchment as our count of births by catchment.
+  * Union all enrollment years together
+  * Join enrollments to the count of births by catchment. Compute the ratio of births to enrollments.
+
+
+## Exploration
+
+The below summaries and histgrams display the ratio of births to enrollments.
+
+```{r, echo=F}
+library(RPostgreSQL)
+library(ggplot2)
+
+dsn_database <- 'sdp'
+dsn_hostname <- 'localhost'
+dsn_port <- 5432
+dsn_uid <- '' # TODO specify the username locally. Don't commit code with credentials
+#dsn_pwd <- ''
+
+tryCatch({
+    drv <- dbDriver("PostgreSQL")
+    print("Connecting to Database…")
+    connec <- dbConnect(drv, 
+                 dbname = dsn_database,
+                 host = dsn_hostname, 
+                 port = dsn_port,
+                 user = dsn_uid)
+    print("Database Connected!")
+    },
+    error=function(cond) {
+            print("Unable to connect to Database.")
+    })
+
+df <- dbGetQuery(connec, "select * from public.births_to_enrollment")
+#head(df)
+
+# split out different years and chart them
+
+ggplot(df, aes(x=catchment_year, y=ratio, group=catchment_year, color=catchment_year)) +
+  coord_flip() +
+  geom_boxplot()
+
+
+```
+
+
+
