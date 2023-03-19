@@ -173,29 +173,26 @@ def main():
         )
 
     print("Processing census tract files...")
+    # TODO consider using the ogr python interface
+    # http://pcjericks.github.io/py-gdalogr-cookbook/vector_layers.html#create-a-postgis-table-from-wkt
 
-    tract_years = [
-        '2011',
-        '2012',
-        '2013',
-        '2014',
-    ]
-
-    for year in tqdm(tract_years):
-        subprocess.run(
-            [
-                'ogr2ogr',
-                '-f', 'PostgreSQL',
-                f'Pg:dbname={db} host=localhost port=5432 user={user}',
-                '-lco', f'SCHEMA={census_schema}',
-                '-lco', 'OVERWRITE=YES',
-                '-nlt', 'PROMOTE_TO_MULTI',
-                '-where', "countyfp = \'101\'",
-                '-t_srs', 'EPSG:2272',
-                f"/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER{year}/TRACT/tl_{year}_42_tract.zip"
-            ],
-            check=True,
-        )
+    # The 2010 tracts file doesn't follow the pattern of years >=2011, so I'm processing this as a one-off.
+    print("Processing 2010")
+    subprocess.run(
+        [
+            'ogr2ogr',
+            '-f', 'PostgreSQL',
+            f'Pg:dbname={db} host=localhost port=5432 user={user}',
+            '-lco', f'SCHEMA={census_schema}',
+            '-lco', 'OVERWRITE=YES',
+            '-nlt', 'PROMOTE_TO_MULTI',
+            '-sql', "select 2010 as year, tractce10 as tractce, geoid10 as geoid, name10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_tract10 where countyfp10 = '101'",
+            '-t_srs', 'EPSG:2272',
+            '-nln', 'tract',
+            '/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_42101_tract10.zip',
+        ],
+        check=True,
+    )
 
     print(f'Process sdp catchment shape files...') 
     catchment_years = [

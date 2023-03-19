@@ -2,109 +2,10 @@
 PostGIS pipeline to create intersections of census and catchment data
 */
 
--- union all of the census tract years
-
-if exists drop table census.tracts_all_years;
-
-create table if not exists census.tracts_all_years as
-select
-	2019 as census_year,
-	tractce,
-	geoid,
-	name,
-	aland,
-	awater,
-	wkb_geometry
-from census.tl_2019_42_tract
-
-union all
-
-select
-	2018 as census_year,
-	tractce,
-	geoid,
-	name,
-	aland,
-	awater,
-	wkb_geometry
-from census.tl_2018_42_tract
-
-union all
-
-select
-	2017 as census_year,
-	tractce,
-	geoid,
-	name,
-	aland,
-	awater,
-	wkb_geometry
-from census.tl_2017_42_tract
-
-union all
-
-select
-	2016 as census_year,
-	tractce,
-	geoid,
-	name,
-	aland,
-	awater,
-	wkb_geometry
-from census.tl_2016_42_tract
-
-union all
-
-select
-	2014 as census_year,
-	tractce,
-	geoid,
-	name,
-	aland,
-	awater,
-	wkb_geometry
-from census.tl_2014_42_tract
-
-union all
-
-select
-	2013 as census_year,
-	tractce,
-	geoid,
-	name,
-	aland,
-	awater,
-	wkb_geometry
-from census.tl_2013_42_tract
-
-union all
-
-select
-	2012 as census_year,
-	tractce,
-	geoid,
-	name,
-	aland,
-	awater,
-	wkb_geometry
-from census.tl_2012_42_tract
-
-union all
-
-select
-	2011 as census_year,
-	tractce,
-	geoid,
-	name,
-	aland,
-	awater,
-	wkb_geometry
-from census.tl_2011_42_tract;
-
 
 -- union all the elementary catchments by year
 
-if exists drop table sdp.catchments_all_years;
+drop table if exists  sdp.catchments_all_years;
 
 create table if not exists sdp.catchments_all_years as
 select
@@ -159,24 +60,22 @@ create table if not exists public.catchment_overlap as
 		catch.catchment_year as catchment_year,
 		catch.es_id,
 		catch.es_short,
-		tract.census_year as census_year,
+		tract.year as census_year,
 		tract.geoid,
 		tract.tractce,
 		st_area(st_intersection(tract.wkb_geometry, catch.wkb_geometry)) as overlap_area, -- area of the intersection
 		st_area(st_intersection(tract.wkb_geometry, catch.wkb_geometry)) / st_area(tract.wkb_geometry) as overlap_ratio, -- percent of the intersection in the catchment
 		st_intersection(tract.wkb_geometry, catch.wkb_geometry) as overlap
 	from
-		census.tracts_all_years tract
+		census.tract
 		inner join
 			sdp.catchments_all_years catch
 			on
+				-- round catchments to last 10 years
 				-- 5 year lag between birth and enrollment eligibiltiy
-				catch.catchment_year = tract.census_year + 5
+				round(catch.catchment_year - 5, -1) = tract.year
 	where
-		--st_intersects(tract.wkb_geometry, catch.wkb_geometry)
-		-- Get only significant intersections
-		st_area(st_intersection(tract.wkb_geometry, catch.wkb_geometry)) / st_area(tract.wkb_geometry) > 0.01;
-
+		st_intersects(tract.wkb_geometry, catch.wkb_geometry);
 
 
 -- match births to tracts
@@ -231,28 +130,21 @@ with overlap as (
 	select
 		overlap.census_year,
 		overlap.catchment_year as catchment_year,
-		tract.name,
-		cast(tract.tractce as text) as tractce,
+		--tract.name,
+		overlap.tractce as tractce,
 		overlap.es_id,
 		overlap.es_short,
 		births.all as births,
 		overlap.overlap_ratio,
 		births.all * overlap.overlap_ratio as births_weighted
-	from census.tracts_all_years tract
-	inner join
+	from
 		census.births_all_years births
-		on
-			cast(tract.tractce as text) = lpad(cast(births.census_tract as text), 6, '0')
-		and
-			births."year" = tract.census_year
 	inner join
 		public.catchment_overlap overlap
 		on
-			overlap.tractce = tract.tractce
+			overlap.tractce = lpad(cast(births.census_tract as text), 6, '0')
 		and
-			overlap.catchment_year = tract.census_year + 5
-		and
-			overlap.census_year = births."year"
+			overlap.catchment_year = births.year + 5
 )
 select
 	census_year,
@@ -365,8 +257,3 @@ inner join
 	and
 		kindergarten.catchment_year = births.catchment_year
 ;
-
--- this is pretty interesting. There's a dramatic shift at 2016. Wonder why...
---select * from public.births_to_enrollment
---where es_short = 'Lea'
---;
