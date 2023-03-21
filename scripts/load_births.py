@@ -194,6 +194,14 @@ def main():
         check=True,
     )
 
+    # TODO change filename
+
+    # TODO load the 2010 and 2020 block group shapes for the county
+
+    # TODO load ACS 5-year estimates 2010, 2015, 2020, should be down to block groups
+
+
+    # TODO add the year to the sdp shape?
     print(f'Process sdp catchment shape files...') 
     catchment_years = [
         '1617',
