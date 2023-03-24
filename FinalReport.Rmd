@@ -188,13 +188,13 @@ There's no apparent correlation between race and ratio
 
 ```{r, echo=F, "Distribution_of_Household_Income"}
 
-income_query <- "select distinct census_year, es_short, median_household_income from census.income_by_catchment"
+income_query <- "select distinct acs_year, es_short, median_household_income from census.income_by_catchment"
 
 
 df_income <- dbGetQuery(connec, income_query)
-df_income$census_year <- as.factor(df_income$census_year)
+df_income$acs_year <- as.factor(df_income$acs_year)
 
-ggplot(df_income, aes(x=census_year, y=median_household_income)) +
+ggplot(df_income, aes(x=acs_year, y=median_household_income)) +
   coord_flip() +
   geom_boxplot()
 
