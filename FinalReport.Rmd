@@ -40,18 +40,53 @@ TODO Download and join the census/ACS data at the lowest granularity that demogr
 
 A summary so far:
 
-1. In a python script, load local births files to PostGIS
-2. In a python script, download remote enrollment files and load those local files to PostGIS (3 formats)
-3. In a python script, write remote census tract shapes for Philadelphia county to PostGIS
-4. In a python script, download, unzip, then write local catchment shapes for School District of Philadelphia to PostGIS
-5. In a sql script,
-  * Union all census tract years together
+1. python script
+
+* Download births files from internet archive -> 
+            Manually clean files ->
+                       Load each file to a table in PostGIS
+
+* Download enrollment data from SDP DPO ->
+            Parse out the data from the files (in three formats) ->
+                       Load each file to a table in PostGIS
+
+* Load 2010 census tract shape files
+  - ogr2ogr subprocess call
+
+* Load 2010 census block group shape files
+  - ogr2ogr subprocess call
+
+* Load 2010 census data: race, TODO others
+  - api call
+
+* Download catchment shape files from SDP DPO ->
+            Unzip each file ->
+                      ogr2ogr subprocess call to load just the elementary school catchments
+
+2. sql script
+  
   * Union all catchment years together
-  * Join tracts and catchments to build the intersections of the two. Compute the ratio of each tract in each catchment.
+  
+  * Find intersections of catchments and census tracts. Compute the ratio of each tract in each catchment.
+  
+  * Find intersections of catchments and census block groups. Compute the ratio of each block group in each catchment.
+
   * Union all birth years together
-  * Join births to the intersection of tracts and catchments. Multiply the births in catchment by the ratio of area in each tract. Sum the area-weighted births by catchment as our count of births by catchment.
+  
+  * Compute births by catchment
+    - Join births to the intersection of tracts and catchments.
+    - Multiply the births in catchment by the ratio of area in each tract.
+    - Sum the area-weighted births by catchment as our count of births by catchment.
+
   * Union all enrollment years together
+  
   * Join enrollments to the count of births by catchment. Compute the ratio of births to enrollments.
+  
+  * Compute demographic information about catchments
+    - Join demographics to the intersection of block groups and catchments.
+    - Multiply the raw counts of each demographic by the ratio of area in each block group.
+    - Sum the area-weighted raw counts by catchment.
+    - Compute the proportion of each demographic for each catchment.
 
 
 ## Exploration
@@ -82,8 +117,9 @@ tryCatch({
             print("Unable to connect to Database.")
     })
 
-df <- dbGetQuery(connec, "select * from public.births_to_enrollment")
+df <- dbGetQuery(connec, "select catchment_year, ratio from public.births_to_enrollment")
 #head(df)
+df$catchment_year <- as.factor(df$catchment_year)
 
 # split out different years and chart them
 

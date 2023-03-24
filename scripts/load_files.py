@@ -23,6 +23,7 @@ from tqdm import tqdm
 import urllib.request
 import zipfile
 
+census_key = '' # TODO add your key here
 
 def get_csvs(file_path):
     return list(filter(lambda f: re.search(r"\.csv$", f), os.listdir(file_path)))
@@ -172,11 +173,9 @@ def main():
             if_exists='replace',
         )
 
-    print("Processing census tract files...")
+    print("Processing census tract shape files...")
     # TODO consider using the ogr python interface
     # http://pcjericks.github.io/py-gdalogr-cookbook/vector_layers.html#create-a-postgis-table-from-wkt
-
-    # The 2010 tracts file doesn't follow the pattern of years >=2011, so I'm processing this as a one-off.
     print("Processing 2010")
     subprocess.run(
         [
@@ -194,11 +193,86 @@ def main():
         check=True,
     )
 
-    # TODO change filename
+    print("Processing census block group shape files...")
+    print("Processing 2010")
+    subprocess.run(
+        [
+            'ogr2ogr',
+            '-f', 'PostgreSQL',
+            f'Pg:dbname={db} host=localhost port=5432 user={user}',
+            '-lco', f'SCHEMA={census_schema}',
+            '-lco', 'OVERWRITE=YES',
+            '-nlt', 'PROMOTE_TO_MULTI',
+            '-sql', "select 2010 as year, tractce10 as tractce, blkgrpce10 as blkgrpce, geoid10 as geoid, namelsad10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_bg10 where countyfp10 = '101'",
+            '-t_srs', 'EPSG:2272',
+            '-nln', 'block_group',
+            '/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/BG/2010/tl_2010_42101_bg10.zip',
+        ],
+        check=True,
+    )
 
-    # TODO load the 2010 and 2020 block group shapes for the county
+    print("Process block group data...")
+    """
+    Documentation on census 2010 race columns:
+        https://api.census.gov/data/2010/dec/sf1/groups/P3.html
+    Documentation on acs 2015 race columns:
+        https://www2.census.gov/programs-surveys/acs/summary_file/2015/documentation/user_tools/ACS2015_Table_Shells.xlsx
+    """
+    block_group_years = {
+        "census_2010": {
+            "url": "https://api.census.gov/data/2010/dec/sf1?get=NAME,P003001,P003002,P003003,P003004,P003005,P003006,P003007,P003008&for=block%20group:*&in=state:42&in=county:101&in=tract:*&key={census_key}",
+            "fields": [
+                "Name",
+                "Total",
+                "White alone",
+                "Black or African American alone",
+                "American Indian and Alaska Native alone",
+                "Asian alone",
+                "Native Hawaiian and Other Pacific Islander alone",
+                "Some Other Race alone",
+                "Two or More Races",
+                "state",
+                "county",
+                "tract",
+                "block_group",
+            ],
+        },
+        "acs_2015": {
+            "url": "https://api.census.gov/data/2015/acs/acs5?get=NAME,B02001_001E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B02001_006E,B02001_007E,B02001_008E&for=block%20group:*&in=state:42&in=county:101&in=tract:*&key={census_key}",
+            "fields": [
+                "Name",
+                "Total",
+                "White alone",
+                "Black or African American alone",
+                "American Indian and Alaska Native alone",
+                "Asian alone",
+                "Native Hawaiian and Other Pacific Islander alone",
+                "Some other race alone",
+                "Two or more races",
+                "state",
+                "county",
+                "tract",
+                "block_group",
+            ],
+        },
+    }
+    for year in block_group_years:
+        print(f"Processing {year}")
+        url = block_group_years[year]['url']
+        fields = block_group_years[year]['fields']
 
-    # TODO load ACS 5-year estimates 2010, 2015, 2020, should be down to block groups
+        df = pandas.read_json(url.format(census_key=census_key))
+        # df.iloc[0] # TODO save census designations as comments on the columns
+        df.columns = fields
+        df.rename(columns=clean_col, inplace=True)
+        df = df.drop(axis='index', index=0)
+        
+        df.to_sql(
+            name=year,
+            con=engine,
+            schema='census',
+            if_exists='replace',
+        )
 
 
     # TODO add the year to the sdp shape?
