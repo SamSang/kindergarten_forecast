@@ -173,6 +173,53 @@ def main():
             if_exists='replace',
         )
 
+    print("Processing SDP list of schools...")
+    list_data_path = os.path.join('..', 'data', 'schools', 'list')
+
+    print("Processing 2001-2002 through 2016-2017")
+    list_historical_url = 'https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/Longitudinal%20School%20List%20(20171128).xlsx'
+    list_historical_download_file = f'Histoical_School_list.xlsx'
+    list_historical_download_path = os.path.join(list_data_path, list_historical_download_file)
+    urllib.request.urlretrieve(list_historical_url, list_historical_download_path)
+
+    list_historical_workbook = openpyxl.load_workbook(list_historical_download_path)
+
+    list_historical = list_historical_workbook['Sheet1'].values
+
+    list_historical_cols = list(next(list_historical)[0:27])
+
+    list_historical = [r[0:27] for r in list(list_historical)]
+
+    df_list_historical = pandas.DataFrame(list_historical, columns=list_historical_cols)
+    df_list_historical.rename(columns=clean_col, inplace=True)
+
+    list_keep_cols = [
+        "school_year",
+        "pa_code",
+        "ulcs_code",
+        "admission_type",
+        "grade_span",
+        "school_level",
+        "governance",
+        "school_region_code",
+        "school_region",
+        "year_closed",
+    ]
+    df_list_historical = df_list_historical.filter(list_keep_cols, axis=1)
+
+    table_name = clean_col(f'schools_list')
+    df_list_historical.to_sql(
+        name=table_name,
+        con=engine,
+        schema='sdp',
+        if_exists='replace',
+    )
+
+    print("Processing 2017-2018")
+    list_1718_url =        "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/2017-2018%20Master%20School%20List%20(20180611).xlsx"
+    #list_historical_url = 'https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/Longitudinal%20School%20List%20(20171128).xlsx'
+    
+
     print("Processing census tract shape files...")
     # TODO consider using the ogr python interface
     # http://pcjericks.github.io/py-gdalogr-cookbook/vector_layers.html#create-a-postgis-table-from-wkt
