@@ -3,6 +3,23 @@ PostGIS pipeline to create intersections of census and catchment data
 */
 
 
+-- build view to restrict us to district schools
+
+drop view if exists sdp.district_school;
+
+create view sdp.district_school as
+	select
+		school_year,
+		cast(substring(school_year, 1, 4) as integer) as start_year,
+		ulcs_code
+	from sdp.school
+	where school_year in ('2016-2017', '2017-2018', '2018-2019', '2019-2020')
+	and upper(admission_type) = 'NEIGHBORHOOD'
+	and upper(governance) = 'DISTRICT'
+	and current_grade_span_served like '%00%'
+	and (year_closed = 'open' or year_closed is null);
+
+
 -- union all the elementary catchments by year
 
 drop table if exists  sdp.catchments_all_years;
@@ -295,10 +312,35 @@ inner join
 drop table if exists public.demog_by_catchment;
 
 create table public.demog_by_catchment as
-	(with demog_2010 as (
+	
+with demog as (
+		select
+			2010 as "year",
+			"state" || county || tract || block_group as geoid,
+			total,
+			white_alone,
+			black_or_african_american_alone,
+			asian_alone
+		from
+			census.census_2010
+		
+		union all
+		
+		select
+			2015 as "year",
+			"state" || county || tract || block_group as geoid,
+			total,
+			white_alone,
+			black_or_african_american_alone,
+			asian_alone
+		from
+			census.acs_2015
+	),
+	 overlap as (
 		select
 			overlap.census_year,
 			overlap.catchment_year as catchment_year,
+		 	demog.year as data_year,
 			overlap.geoid,
 			overlap.es_id,
 			overlap.es_short,
@@ -310,55 +352,22 @@ create table public.demog_by_catchment as
 		from
 			public.block_group_overlap overlap
 		inner join
-			census.census_2010 demog
-			on
-				demog.state || demog.county || demog.tract || demog.block_group = overlap.geoid
+		 	sdp.district_school
+		 	on
+		 		cast(district_school.ulcs_code as text) = overlap.es_id
 			and
-				overlap.census_year = 2010
-	)
-	select
-		census_year,
-		catchment_year,
-		es_id,
-		es_short,
-		sum(total_weighted) as total,
-		sum(white_weighted) / sum(total_weighted) as pct_white,
-		sum(black_weighted) / sum(total_weighted) as pct_black,
-		sum(asian_weighted) / sum(total_weighted) as pct_asian
-	from
-		demog_2010
-	group by
-		census_year,
-		catchment_year,
-		es_id,
-		es_short)
-
-	union distinct
-
-	(with acs_2015 as (
-		select
-			2015 as census_year,
-			overlap.catchment_year as catchment_year,
-			overlap.geoid,
-			overlap.es_id,
-			overlap.es_short,
-			cast(demog.total as double precision) * overlap.overlap_ratio as total_weighted,
-			cast(demog.white_alone as double precision) * overlap.overlap_ratio as white_weighted,
-			cast(demog.black_or_african_american_alone as double precision) * overlap.overlap_ratio as black_weighted,
-			cast(demog.asian_alone as double precision) * overlap.overlap_ratio as asian_weighted,
-			overlap.overlap_ratio
-		from
-			public.block_group_overlap overlap
+		 		district_school.start_year = overlap.catchment_year
 		inner join
-			census.acs_2015 demog
+			demog
 			on
-				demog.state || demog.county || demog.tract || demog.block_group = overlap.geoid
+				demog.geoid = overlap.geoid
 			and
 				overlap.census_year = 2010
 	)
 	select
 		census_year,
 		catchment_year,
+	 	data_year,
 		es_id,
 		es_short,
 		sum(total_weighted) as total,
@@ -366,9 +375,11 @@ create table public.demog_by_catchment as
 		sum(black_weighted) / sum(total_weighted) as pct_black,
 		sum(asian_weighted) / sum(total_weighted) as pct_asian
 	from
-		acs_2015
+		overlap
 	group by
 		census_year,
 		catchment_year,
+	 	data_year,
 		es_id,
-		es_short);
+		es_short
+	order by es_id, data_year;
