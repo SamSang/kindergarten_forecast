@@ -5,9 +5,9 @@ PostGIS pipeline to create intersections of census and catchment data
 
 -- build view to restrict us to district schools
 
-drop view if exists sdp.district_school;
+drop table if exists sdp.district_school;
 
-create view sdp.district_school as
+create table sdp.district_school as
 	select
 		school_year,
 		cast(substring(school_year, 1, 4) as integer) as start_year,
