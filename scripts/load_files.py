@@ -34,6 +34,7 @@ def clean_col(col: str):
     col = col.replace(',', '')
     col = col.replace('.', '')
     col = col.replace('-', '_')
+    col = col.replace('\n', '_')
     col = col.replace('#', '')
     col = col.replace('%', '')
     col = col.replace('  ', '_')
@@ -199,12 +200,17 @@ def main():
         df_list_historical = pandas.DataFrame(list_historical, columns=list_historical_cols)
         df_list_historical.rename(columns=clean_col, inplace=True)
 
+        list_convert_cols = {
+            "grade_span": "current_grade_span_served",
+        }
+        df_list_historical.rename(columns=list_convert_cols, inplace=True)
+
         list_keep_cols = [
             "school_year",
             "pa_code",
             "ulcs_code",
             "admission_type",
-            "grade_span",
+            "current_grade_span_served",
             "school_level",
             "governance",
             "school_region_code",
@@ -249,7 +255,7 @@ def main():
             "pa_code",
             "ulcs_code",
             "admission_type",
-            "grade_span",
+            "current_grade_span_served",
             "school_level",
             "governance",
             "school_region_code",
