@@ -93,9 +93,10 @@ A summary so far:
 
 The below summaries and histgrams display the ratio of births to enrollments.
 
-```{r, echo=F}
+```{r, echo=F, "Connection"}
 library(RPostgreSQL)
 library(ggplot2)
+library(tidyr)
 
 dsn_database <- 'sdp'
 dsn_hostname <- 'localhost'
@@ -116,6 +117,9 @@ tryCatch({
     error=function(cond) {
             print("Unable to connect to Database.")
     })
+```
+
+```{r, echo=F, "Distribution_of_ratio"}
 
 df <- dbGetQuery(connec, "select catchment_year, ratio from public.births_to_enrollment")
 #head(df)
@@ -126,9 +130,60 @@ df$catchment_year <- as.factor(df$catchment_year)
 ggplot(df, aes(x=catchment_year, y=ratio, group=catchment_year, color=catchment_year)) +
   coord_flip() +
   geom_boxplot()
+```
 
+There's skew in the distribution of ratios
+
+
+```{r, echo=F, "Distribution_of_race"}
+
+race_query <- 'select census_year as "year", es_short as school, pct_white, pct_black from public.demog_by_catchment where catchment_year = 2019'
+df <- dbGetQuery(connec, race_query)
+df$year <- as.factor(df$year)
+
+# plot changes to demographics over time
+df_plot <- pivot_longer(df, c(pct_white, pct_black))
+df_plot$year <- as.factor(df_plot$year)
+
+# there's very little change in the distribution of schools over time
+ggplot(df_plot, aes(x=name, y=value, color=year)) +
+  coord_flip() +
+  geom_boxplot()
+```
+
+There's very little change in the distribution of schools over time
+
+
+```{r, echo=F, "Correlation_Race_to_Ratio"}
+
+compare_query <- "select
+	demog.catchment_year,
+	demog.es_short,
+	demog.pct_white,
+	demog.pct_black,
+	ratio.ratio
+from 
+	public.demog_by_catchment demog
+inner join
+	public.births_to_enrollment ratio
+	on
+		demog.catchment_year = ratio.catchment_year
+	and
+		demog.es_id = ratio.es_id
+where
+	demog.census_year = 2010"
+
+df_compare <- dbGetQuery(connec, compare_query)
+df_compare$catchment_year <- as.factor(df_compare$catchment_year)
+
+ggplot(df_compare, aes(x=ratio, y=pct_white, color=es_short)) +
+  geom_point(show.legend = FALSE)
+
+ggplot(df_compare, aes(x=ratio, y=pct_black, color=es_short)) +
+  geom_point(show.legend = FALSE)
 
 ```
 
+There's no apparent correlation between race and ratio
 
 
