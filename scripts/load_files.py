@@ -335,6 +335,17 @@ def main():
                 "block_group",
             ],
         },
+        "acs_2010": {
+            "url": "https://api.census.gov/data/2010/acs/acs5?get=NAME,B00002_001E,B19013_001E&for=tract:*&in=state:42&in=county:101&key={census_key}",
+            "fields": [
+                "Name",
+                "Total Households",
+                "Median Household Income",
+                "state",
+                "county",
+                "tract",
+            ],
+        },
         "acs_2015": {
             "url": "https://api.census.gov/data/2015/acs/acs5?get=NAME,B02001_001E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B02001_006E,B02001_007E,B02001_008E&for=block%20group:*&in=state:42&in=county:101&in=tract:*&key={census_key}",
             "fields": [

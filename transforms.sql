@@ -383,3 +383,79 @@ with demog as (
 		es_id,
 		es_short
 	order by es_id, data_year;
+
+
+-- Compute average income 
+
+drop table if exists census.income_by_catchment;
+
+create table census.income_by_catchment as
+with overlap as (
+	select
+		overlap.census_year,
+		overlap.catchment_year as catchment_year,
+		overlap.tractce as tractce,
+		overlap.es_id,
+		overlap.es_short,
+		income.total_households,
+		cast(income.median_household_income as double precision) as median_household_income,
+		overlap.overlap_ratio,
+		cast(income.total_households as double precision) * overlap.overlap_ratio as households_weighted
+	from
+		census.acs_2010 income
+	inner join
+		public.catchment_overlap overlap
+		on
+			overlap.tractce = income.tract
+	where cast(income.median_household_income as int) > 0
+),
+household as (
+	-- get total households by year
+	select
+		census_year,
+		catchment_year,
+		es_id,
+		es_short,
+		sum(households_weighted) as total
+	from
+		overlap
+	group by
+		census_year,
+		catchment_year,
+		es_id,
+		es_short
+),
+income as (
+	-- proportion of households in each tract
+	-- weighted average of income
+	select
+		overlap.census_year,
+		overlap.catchment_year,
+		overlap.es_id,
+		overlap.es_short,
+		overlap.median_household_income,
+		overlap.households_weighted / household.total as household_ratio,
+		overlap.median_household_income * (overlap.households_weighted / household.total) as household_income_weighted
+	from
+		overlap
+	inner join
+		household
+		on
+			overlap.catchment_year = household.catchment_year
+		and
+			overlap.es_id = household.es_id
+)
+select
+	census_year,
+	catchment_year,
+	es_id,
+	es_short,
+	cast(sum(household_income_weighted) as int) as median_household_income
+from
+	income
+where es_short = 'Lea'
+group by
+	census_year,
+	catchment_year,
+	es_id,
+	es_short;
