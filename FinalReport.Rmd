@@ -186,4 +186,42 @@ ggplot(df_compare, aes(x=ratio, y=pct_black, color=es_short)) +
 
 There's no apparent correlation between race and ratio
 
+```{r, echo=F, "Distribution_of_Household_Income"}
+
+income_query <- "select distinct census_year, es_short, median_household_income from census.income_by_catchment"
+
+
+df_income <- dbGetQuery(connec, income_query)
+df_income$census_year <- as.factor(df_income$census_year)
+
+ggplot(df_income, aes(x=census_year, y=median_household_income)) +
+  coord_flip() +
+  geom_boxplot()
+
+compare_income_query <- "select
+	income.catchment_year,
+	income.es_short,
+	income.median_household_income,
+	ratio.ratio
+from 
+	census.income_by_catchment income
+inner join
+	public.births_to_enrollment ratio
+	on
+		income.catchment_year = ratio.catchment_year
+	and
+		income.es_id = ratio.es_id"
+
+
+df_income_compare <- dbGetQuery(connec, compare_income_query)
+head(df_income_compare)
+df_income_compare$catchment_year <- as.factor(df_income_compare$catchment_year)
+
+ggplot(df_income_compare, aes(x=ratio, y=median_household_income, color=es_short)) +
+  geom_point(show.legend = FALSE)
+
+```
+
+There might be slightly more correlation in the relationship between income and conversion ratio.
+
 

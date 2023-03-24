@@ -453,7 +453,6 @@ select
 	cast(sum(household_income_weighted) as int) as median_household_income
 from
 	income
-where es_short = 'Lea'
 group by
 	census_year,
 	catchment_year,
