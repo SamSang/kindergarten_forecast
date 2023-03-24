@@ -390,9 +390,26 @@ with demog as (
 drop table if exists census.income_by_catchment;
 
 create table census.income_by_catchment as
-with overlap as (
+with income as (
 	select
-		overlap.census_year,
+		2015 as acs_year,
+		tract,
+		total_households,
+		median_household_income
+	from census.acs_tract_2015
+	
+	union all
+	
+	select
+		2010 as acs_year,
+		tract,
+		total_households,
+		median_household_income
+	from census.acs_2010
+),
+overlap as (
+	select
+		income.acs_year,
 		overlap.catchment_year as catchment_year,
 		overlap.tractce as tractce,
 		overlap.es_id,
@@ -402,7 +419,7 @@ with overlap as (
 		overlap.overlap_ratio,
 		cast(income.total_households as double precision) * overlap.overlap_ratio as households_weighted
 	from
-		census.acs_2010 income
+		income
 	inner join
 		public.catchment_overlap overlap
 		on
@@ -412,7 +429,7 @@ with overlap as (
 household as (
 	-- get total households by year
 	select
-		census_year,
+		acs_year,
 		catchment_year,
 		es_id,
 		es_short,
@@ -420,16 +437,16 @@ household as (
 	from
 		overlap
 	group by
-		census_year,
+		acs_year,
 		catchment_year,
 		es_id,
 		es_short
 ),
-income as (
+income_weighted as (
 	-- proportion of households in each tract
 	-- weighted average of income
 	select
-		overlap.census_year,
+		overlap.acs_year,
 		overlap.catchment_year,
 		overlap.es_id,
 		overlap.es_short,
@@ -446,15 +463,15 @@ income as (
 			overlap.es_id = household.es_id
 )
 select
-	census_year,
+	acs_year,
 	catchment_year,
 	es_id,
 	es_short,
 	cast(sum(household_income_weighted) as int) as median_household_income
 from
-	income
+	income_weighted
 group by
-	census_year,
+	acs_year,
 	catchment_year,
 	es_id,
 	es_short;
