@@ -214,7 +214,7 @@ inner join
 
 
 df_income_compare <- dbGetQuery(connec, compare_income_query)
-head(df_income_compare)
+#head(df_income_compare)
 df_income_compare$catchment_year <- as.factor(df_income_compare$catchment_year)
 
 ggplot(df_income_compare, aes(x=ratio, y=median_household_income, color=es_short)) +
@@ -223,5 +223,43 @@ ggplot(df_income_compare, aes(x=ratio, y=median_household_income, color=es_short
 ```
 
 There might be slightly more correlation in the relationship between income and conversion ratio.
+
+```{r, "Explore_deltas"}
+
+deltas_query <- "select
+	ratio.year_1,
+	ratio.year_2,
+	ratio.es_id,
+	cast(ratio.year_1 as text) || '-' || cast(ratio.year_2 as text) as years_delta,
+	income.median_household_income_delta as income_delta,
+	ratio.ratio_delta
+from public.ratio_delta ratio
+inner join
+	census.income_deltas income
+	on
+		ratio.es_id = income.es_id"
+
+
+df_deltas <- dbGetQuery(connec, deltas_query)
+head(df_deltas)
+
+
+ggplot(df_deltas, aes(x=years_delta, y=ratio_delta, group = years_delta, color=years_delta)) +
+  coord_flip() +
+  geom_boxplot()
+
+ggplot(df_deltas, aes(x=years_delta, y=income_delta, group = years_delta, color=years_delta)) +
+  coord_flip() +
+  geom_boxplot()
+
+
+ggplot(df_deltas, aes(x=ratio_delta, y=income_delta, color=years_delta)) +
+  geom_point()
+
+```
+
+There seems to be clustering around zero change.
+
+
 
 

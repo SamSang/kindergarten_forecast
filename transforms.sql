@@ -475,3 +475,53 @@ group by
 	catchment_year,
 	es_id,
 	es_short;
+
+
+-- Compute income deltas within districts between years
+drop table if exists census.income_deltas;
+
+create table census.income_deltas as 
+select
+	catch_1.acs_year as acs_year_1,
+	catch_2.acs_year as acs_year_2,
+	catch_1.es_id,
+	catch_1.es_short,
+	catch_1.catchment_year,
+	-- these are nominal values and should be pegged to inflation
+	-- but I'm moving quickly and just need to see what's viable
+	catch_1.median_household_income as median_household_income_1,
+	catch_2.median_household_income as median_household_income_2,
+	catch_2.median_household_income - catch_1.median_household_income as median_household_income_delta
+from
+	census.income_by_catchment catch_1
+inner join
+	census.income_by_catchment catch_2
+	on
+		catch_1.catchment_year = catch_2.catchment_year
+	and
+		catch_1.es_id = catch_2.es_id
+	and
+		catch_1.acs_year = catch_2.acs_year - 5;
+
+
+-- Compute ratio deltas within catchments between years
+
+drop table if exists public.ratio_delta;
+
+create table public.ratio_delta as
+select
+	ratio_1.catchment_year as year_1,
+	ratio_2.catchment_year as year_2,
+	ratio_1.es_id,
+	ratio_1.es_short,
+	ratio_1.ratio as ratio_1,
+	ratio_2.ratio as ratio_2,
+	ratio_2.ratio - ratio_1.ratio as ratio_delta
+from
+	public.births_to_enrollment ratio_1
+inner join
+	public.births_to_enrollment ratio_2
+	on
+		ratio_1.es_id = ratio_2.es_id
+	and
+		ratio_1.catchment_year = ratio_2.catchment_year - 1;
