@@ -97,6 +97,8 @@ The below summaries and histgrams display the ratio of births to enrollments.
 library(RPostgreSQL)
 library(ggplot2)
 library(tidyr)
+library(dplyr)
+library(explore)
 
 dsn_database <- 'sdp'
 dsn_hostname <- 'localhost'
@@ -111,7 +113,9 @@ tryCatch({
                  dbname = dsn_database,
                  host = dsn_hostname, 
                  port = dsn_port,
-                 user = dsn_uid)
+                 user = dsn_uid
+                 )
+    #on.exit(dbDisconnect(connec))
     print("Database Connected!")
     },
     error=function(cond) {
@@ -119,20 +123,42 @@ tryCatch({
     })
 ```
 
-```{r, echo=F, "Distribution_of_ratio"}
 
-df <- dbGetQuery(connec, "select catchment_year, ratio from public.births_to_enrollment")
-#head(df)
-df$catchment_year <- as.factor(df$catchment_year)
+```{r, echo=F, "Comparison"}
 
-# split out different years and chart them
+full_compare_query <- "select * from public.comparison"
 
-ggplot(df, aes(x=catchment_year, y=ratio, group=catchment_year, color=catchment_year)) +
+df_full_compare <- dbGetQuery(connec, full_compare_query)
+
+df_full_compare$catchment_year <- as.factor(df_full_compare$catchment_year)
+#head(df_full_compare[2:8])
+
+explore_all(df_full_compare, target = ratio)
+explore_all(df_full_compare, target = ratio_delta)
+#explore(df_full_compare)
+
+#head(df_full_compare)
+#pairs(df_full_compare[3:9])
+
+ggplot(df_full_compare, aes(x=catchment_year, y=ratio, group=catchment_year, color=catchment_year)) +
   coord_flip() +
   geom_boxplot()
+
+# remove outliers that ruin our data
+df.income <- df_full_compare
+df.income$median_household_income[df.income$median_household_income < -20000] <- NA
+df.income <- subset(df.income, complete.cases(df.income))
+
+ggplot(df.income, aes(x=median_household_income, y=ratio, group=median_household_income, color=median_household_income)) +
+  geom_point()
 ```
 
-There's skew in the distribution of ratios
+### Takeaways
+
+- There's skew in the distribution of ratios
+- There's no apparent correlation between race and ratio
+- There might be slight correlation in the relationship between income and ratio.
+- There seems to be clustering around zero change in ratio deltas and income deltas.
 
 
 ```{r, echo=F, "Distribution_of_race"}
@@ -153,113 +179,6 @@ ggplot(df_plot, aes(x=name, y=value, color=year)) +
 
 There's very little change in the distribution of schools over time
 
-
-```{r, echo=F, "Correlation_Race_to_Ratio"}
-
-compare_query <- "select
-	demog.catchment_year,
-	demog.es_short,
-	demog.pct_white,
-	demog.pct_black,
-	ratio.ratio
-from 
-	public.demog_by_catchment demog
-inner join
-	public.births_to_enrollment ratio
-	on
-		demog.catchment_year = ratio.catchment_year
-	and
-		demog.es_id = ratio.es_id
-where
-	demog.census_year = 2010"
-
-df_compare <- dbGetQuery(connec, compare_query)
-df_compare$catchment_year <- as.factor(df_compare$catchment_year)
-
-ggplot(df_compare, aes(x=ratio, y=pct_white, color=es_short)) +
-  geom_point(show.legend = FALSE)
-
-ggplot(df_compare, aes(x=ratio, y=pct_black, color=es_short)) +
-  geom_point(show.legend = FALSE)
-
+```{r, "Teardown"}
+dbDisconnect(connec)
 ```
-
-There's no apparent correlation between race and ratio
-
-```{r, echo=F, "Distribution_of_Household_Income"}
-
-income_query <- "select distinct acs_year, es_short, median_household_income from census.income_by_catchment"
-
-
-df_income <- dbGetQuery(connec, income_query)
-df_income$acs_year <- as.factor(df_income$acs_year)
-
-ggplot(df_income, aes(x=acs_year, y=median_household_income)) +
-  coord_flip() +
-  geom_boxplot()
-
-compare_income_query <- "select
-	income.catchment_year,
-	income.es_short,
-	income.median_household_income,
-	ratio.ratio
-from 
-	census.income_by_catchment income
-inner join
-	public.births_to_enrollment ratio
-	on
-		income.catchment_year = ratio.catchment_year
-	and
-		income.es_id = ratio.es_id"
-
-
-df_income_compare <- dbGetQuery(connec, compare_income_query)
-#head(df_income_compare)
-df_income_compare$catchment_year <- as.factor(df_income_compare$catchment_year)
-
-ggplot(df_income_compare, aes(x=ratio, y=median_household_income, color=es_short)) +
-  geom_point(show.legend = FALSE)
-
-```
-
-There might be slightly more correlation in the relationship between income and conversion ratio.
-
-```{r, "Explore_deltas"}
-
-deltas_query <- "select
-	ratio.year_1,
-	ratio.year_2,
-	ratio.es_id,
-	cast(ratio.year_1 as text) || '-' || cast(ratio.year_2 as text) as years_delta,
-	income.median_household_income_delta as income_delta,
-	ratio.ratio_delta
-from public.ratio_delta ratio
-inner join
-	census.income_deltas income
-	on
-		ratio.es_id = income.es_id"
-
-
-df_deltas <- dbGetQuery(connec, deltas_query)
-head(df_deltas)
-
-
-ggplot(df_deltas, aes(x=years_delta, y=ratio_delta, group = years_delta, color=years_delta)) +
-  coord_flip() +
-  geom_boxplot()
-
-ggplot(df_deltas, aes(x=years_delta, y=income_delta, group = years_delta, color=years_delta)) +
-  coord_flip() +
-  geom_boxplot()
-
-
-ggplot(df_deltas, aes(x=ratio_delta, y=income_delta, color=years_delta)) +
-  geom_point()
-
-```
-
-There seems to be clustering around zero change.
-
-
-
-
