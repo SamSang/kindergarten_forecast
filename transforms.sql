@@ -11,7 +11,8 @@ create table sdp.district_school as
 	select
 		school_year,
 		cast(substring(school_year, 1, 4) as integer) as start_year,
-		ulcs_code
+		ulcs_code,
+		school_region
 	from sdp.school
 	where school_year in ('2016-2017', '2017-2018', '2018-2019', '2019-2020')
 	and upper(admission_type) = 'NEIGHBORHOOD'
@@ -390,91 +391,97 @@ with demog as (
 drop table if exists census.income_by_catchment;
 
 create table census.income_by_catchment as
-with income as (
-	select
-		2015 as acs_year,
-		tract,
-		total_households,
-		median_household_income
-	from census.acs_tract_2015
-	
-	union all
-	
-	select
-		2010 as acs_year,
-		tract,
-		total_households,
-		median_household_income
-	from census.acs_2010
-),
-overlap as (
-	select
-		income.acs_year,
-		overlap.catchment_year as catchment_year,
-		overlap.tractce as tractce,
-		overlap.es_id,
-		overlap.es_short,
-		income.total_households,
-		cast(income.median_household_income as double precision) as median_household_income,
-		overlap.overlap_ratio,
-		cast(income.total_households as double precision) * overlap.overlap_ratio as households_weighted
-	from
-		income
-	inner join
-		public.catchment_overlap overlap
-		on
-			overlap.tractce = income.tract
-	where cast(income.median_household_income as int) > 0
-),
-household as (
-	-- get total households by year
+
+	with income as (
+		-- one row per tract per acs_year
+		select
+			2015 as acs_year,
+			tract,
+			total_households,
+			median_household_income
+		from census.acs_tract_2015
+
+		union all
+
+		select
+			2010 as acs_year,
+			tract,
+			total_households,
+			median_household_income
+		from census.acs_2010
+	),
+	overlap as (
+		select
+			acs_year,
+			catchment_year,
+			es_id,
+			es_short,
+			tractce,
+			overlap_ratio,
+			income.tract,
+			income.total_households,
+			overlap_ratio * cast(income.total_households as double precision) as households_in_catchment,
+			income.median_household_income as income
+		from
+			public.catchment_overlap o
+		inner join
+			income
+			on
+				o.tractce = income.tract
+			where
+				income.total_households != '0'
+	),
+	catchment_rollup as (
+		select
+			acs_year,
+			catchment_year,
+			es_id,
+			es_short,
+			sum(households_in_catchment) as total_catchment_households
+		from
+			overlap
+		group by
+			acs_year,
+			catchment_year,
+			es_id,
+			es_short
+	),
+	overlap_rollup as (
+		select
+			catchment_rollup.acs_year,
+			catchment_rollup.catchment_year,
+			catchment_rollup.es_id,
+			catchment_rollup.es_short,
+			overlap.total_households as total_households_in_tract,
+			catchment_rollup.total_catchment_households,
+			overlap.households_in_catchment,
+			cast(overlap.income as double precision) as income
+		from
+			catchment_rollup
+		inner join
+			overlap
+				on
+					overlap.acs_year = catchment_rollup.acs_year
+				and
+					overlap.catchment_year = catchment_rollup.catchment_year
+				and
+					overlap.es_id = catchment_rollup.es_id
+	)
 	select
 		acs_year,
 		catchment_year,
 		es_id,
 		es_short,
-		sum(households_weighted) as total
+		--sum(households_in_catchment / total_catchment_households) as sum_ratio,
+		--sum(income * households_in_catchment / total_catchment_households) as median_household_income,
+		cast(sum(income * households_in_catchment / total_catchment_households) as int) as median_household_income
 	from
-		overlap
+		overlap_rollup
 	group by
 		acs_year,
 		catchment_year,
 		es_id,
-		es_short
-),
-income_weighted as (
-	-- proportion of households in each tract
-	-- weighted average of income
-	select
-		overlap.acs_year,
-		overlap.catchment_year,
-		overlap.es_id,
-		overlap.es_short,
-		overlap.median_household_income,
-		overlap.households_weighted / household.total as household_ratio,
-		overlap.median_household_income * (overlap.households_weighted / household.total) as household_income_weighted
-	from
-		overlap
-	inner join
-		household
-		on
-			overlap.catchment_year = household.catchment_year
-		and
-			overlap.es_id = household.es_id
-)
-select
-	acs_year,
-	catchment_year,
-	es_id,
-	es_short,
-	cast(sum(household_income_weighted) as int) as median_household_income
-from
-	income_weighted
-group by
-	acs_year,
-	catchment_year,
-	es_id,
-	es_short;
+		es_short;
 
 
 -- Compute income deltas within districts between years
@@ -516,7 +523,7 @@ select
 	ratio_1.es_short,
 	ratio_1.ratio as ratio_1,
 	ratio_2.ratio as ratio_2,
-	ratio_2.ratio - ratio_1.ratio as ratio_delta
+	ratio_1.ratio - ratio_2.ratio as ratio_delta
 from
 	public.births_to_enrollment ratio_1
 inner join
@@ -524,4 +531,47 @@ inner join
 	on
 		ratio_1.es_id = ratio_2.es_id
 	and
-		ratio_1.catchment_year = ratio_2.catchment_year - 1;
+		ratio_1.catchment_year - 1 = ratio_2.catchment_year;
+
+
+-- build a table to bring together all the variables I want to explore
+
+drop table if exists public.comparison;
+
+create table public.comparison as
+	select
+		birth.catchment_year,
+		birth.es_id,
+		birth.ratio,
+		demog.pct_white,
+		demog.pct_black,
+		demog.pct_asian,
+		income.median_household_income,
+		income_d.median_household_income_delta as income_delta,
+		ratio_d.ratio_delta,
+		school.school_region as region
+	from
+		public.births_to_enrollment birth
+	inner join
+		public.demog_by_catchment demog
+			using(catchment_year, es_id)
+	inner join
+		census.income_by_catchment income
+			using(catchment_year, es_id)
+	inner join
+		sdp.district_school school
+		on
+			school.start_year = birth.catchment_year
+		and
+			cast(school.ulcs_code as text) = birth.es_id
+	left join
+		census.income_deltas income_d
+			using(catchment_year, es_id)
+	left join
+		public.ratio_delta ratio_d
+			on
+				ratio_d.es_id = birth.es_id
+			and
+				ratio_d.year_1 = birth.catchment_year
+	where income.acs_year = 2010
+	and demog.census_year = 2010;
