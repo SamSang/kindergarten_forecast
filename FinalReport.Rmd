@@ -161,6 +161,23 @@ ggplot(df.income, aes(x=median_household_income, y=ratio, group=median_household
 - There seems to be clustering around zero change in ratio deltas and income deltas.
 
 
+Being in a catchment next to a charter school catchment doesn't affect your ratio too much.
+
+```{r}
+
+df.charter <- df_full_compare
+
+df.charter$next_to_charter <- as.factor(df.charter$next_to_charter)
+
+ggplot(df.charter, aes(x=next_to_charter, y=ratio, fill=catchment_year)) +
+  coord_flip() +
+  geom_boxplot()
+
+
+```
+
+
+
 ```{r, echo=F, "Distribution_of_race"}
 
 race_query <- 'select census_year as "year", es_short as school, pct_white, pct_black from public.demog_by_catchment where catchment_year = 2019'

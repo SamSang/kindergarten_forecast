@@ -534,11 +534,133 @@ inner join
 		ratio_1.catchment_year - 1 = ratio_2.catchment_year;
 
 
+
+-- check if district schools overlap with a charter school
+
+drop table if not exists sdp.charter_catchment;
+
+create table sdp.charter_catchment as
+
+	with charters as(
+		select
+			school_year,
+			cast(substring(school_year, 1, 4) as int) as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			current_grade_span_served,
+			lower(governance) as school_region
+		from
+			sdp.school
+		where
+			lower(governance) = 'charter'
+		and
+			current_grade_span_served like '%00%'
+		and
+			year_closed = 'open'
+	)
+	select
+		catch.catchment_year,
+		catch.es_id,
+		catch.es_short,
+		charters.school_region,
+		catch.wkb_geometry
+	from
+		sdp.catchments_all_years as catch
+	inner join
+		charters
+		using(catchment_year, es_id);
+	
+
+
+drop table if exists sdp.charter_catchment_overlap;
+
+create table sdp.charter_catchment_overlap as
+	with charters as(
+		select
+			school_year,
+			cast(substring(school_year, 1, 4) as int) as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			current_grade_span_served,
+			lower(governance) as school_region
+		from
+			sdp.school
+		where
+			lower(governance) = 'charter'
+		and
+			current_grade_span_served like '%00%'
+		and
+			year_closed = 'open'
+	),
+	charter_geom as (
+		select
+			catch.catchment_year,
+			catch.es_id,
+			catch.es_short,
+			charters.school_region,
+			catch.wkb_geometry
+		from
+			sdp.catchments_all_years as catch
+		inner join
+			charters
+			using(catchment_year, es_id)
+	),
+	district_geom as (
+		select 
+			catch.catchment_year,
+			catch.es_id,
+			catch.es_short,
+			distict.school_region,
+			catch.wkb_geometry
+		from
+			sdp.catchments_all_years as catch
+		inner join
+			sdp.district_school as distict
+			on
+				distict.start_year = catch.catchment_year
+			and
+				cast(distict.ulcs_code as character varying) = catch.es_id
+	)
+	select
+		district.catchment_year,
+		district.es_id,
+		district.es_short,
+		district.school_region,
+		charter.es_id as charter_es_id,
+		charter.es_short as charter_es_short,
+		case
+			when charter.es_id is not null then 1
+			else 0
+		end as adjacent,
+		case
+			when st_area(st_intersection(district.wkb_geometry, charter.wkb_geometry)) > 100 then 1
+			else 0
+		end as exact,
+		district.wkb_geometry
+	from
+		district_geom as district
+	left join
+		charter_geom as charter
+		on
+			district.catchment_year = district.catchment_year
+		and
+			st_intersects(district.wkb_geometry, charter.wkb_geometry);
+
+
 -- build a table to bring together all the variables I want to explore
 
 drop table if exists public.comparison;
 
 create table public.comparison as
+	with charter as (
+		select
+			catchment_year,
+			es_id,
+			case when sum(adjacent) > 0 then 1 else 0 end as adjacent
+		from
+			sdp.charter_catchment_overlap
+		group by
+			catchment_year,
+			es_id
+	)
 	select
 		birth.catchment_year,
 		birth.es_id,
@@ -549,7 +671,8 @@ create table public.comparison as
 		income.median_household_income,
 		income_d.median_household_income_delta as income_delta,
 		ratio_d.ratio_delta,
-		school.school_region as region
+		school.school_region as region,
+		charter.adjacent as next_to_charter
 	from
 		public.births_to_enrollment birth
 	inner join
@@ -557,6 +680,9 @@ create table public.comparison as
 			using(catchment_year, es_id)
 	inner join
 		census.income_by_catchment income
+			using(catchment_year, es_id)
+	left join
+		charter
 			using(catchment_year, es_id)
 	inner join
 		sdp.district_school school
