@@ -523,7 +523,13 @@ select
 	ratio_1.es_short,
 	ratio_1.ratio as ratio_1,
 	ratio_2.ratio as ratio_2,
-	ratio_1.ratio - ratio_2.ratio as ratio_delta
+	ratio_1.ratio - ratio_2.ratio as ratio_delta,
+	ratio_1.total_births as births_1,
+	ratio_2.total_births as births_2,
+	ratio_1.total_births - ratio_2.total_births as births_delta,
+	ratio_1.total_enrolled as enrolled_1,
+	ratio_2.total_enrolled as enrolled_2,
+	ratio_1.total_enrolled - ratio_2.total_enrolled as enrolled_delta
 from
 	public.births_to_enrollment ratio_1
 inner join
@@ -691,7 +697,9 @@ create table public.comparison as
 		charter.adjacent as next_to_charter,
 		grade_3.pass_percent,
 		birth.total_births,
-		birth.total_enrolled
+		birth.total_enrolled,
+		ratio_d.enrolled_delta,
+		ratio_d.births_delta
 	from
 		public.births_to_enrollment birth
 	inner join

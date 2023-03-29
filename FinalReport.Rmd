@@ -143,7 +143,9 @@ pairs(df_full_compare[c(3:9,11:12)])
 
 Births and enrollment are correlated
 
-But there's serious hetroscedasticity.
+But there's serious hetroscedasticity betwee births and enrollment.
+
+There's no clear correlation between the year to year changes, unfortunately.
 
 
 ```{r, "Confirm_Assumptions"}
@@ -152,6 +154,10 @@ ggplot(df_full_compare, aes(x=total_births, y=total_enrolled)) +
   geom_point()
 
 # TODO confirm the significance of this correlation, explore the strength
+
+
+ggplot(df_full_compare, aes(x=births_delta, y=enrolled_delta)) +
+  geom_point()
 
 ```
 
