@@ -660,6 +660,22 @@ create table public.comparison as
 		group by
 			catchment_year,
 			es_id
+	),
+	grade_3 as (
+		select
+			cast(school_year as int) - 1 as catchment_year,
+			rpad(cast(school_code as text), 4, '0') as es_id,
+			school_name,
+			grade,
+			sum(cast(case when levels_3_and_4_percent = 's' then '0' else levels_3_and_4_percent end as double precision)) as pass_percent
+		from sdp.score 
+		where grade = '3'
+		and subject = 'ELA'
+		group by
+			school_year,
+			school_code,
+			school_name,
+			grade
 	)
 	select
 		birth.catchment_year,
@@ -672,7 +688,10 @@ create table public.comparison as
 		income_d.median_household_income_delta as income_delta,
 		ratio_d.ratio_delta,
 		school.school_region as region,
-		charter.adjacent as next_to_charter
+		charter.adjacent as next_to_charter,
+		grade_3.pass_percent,
+		birth.total_births,
+		birth.total_enrolled
 	from
 		public.births_to_enrollment birth
 	inner join
@@ -683,6 +702,9 @@ create table public.comparison as
 			using(catchment_year, es_id)
 	left join
 		charter
+			using(catchment_year, es_id)
+	left join
+		grade_3
 			using(catchment_year, es_id)
 	inner join
 		sdp.district_school school

@@ -30,6 +30,7 @@ def get_csvs(file_path):
 
 def clean_col(col: str):
     col = col.lower()
+    col = col.replace('+', ' and ')
     col = col.replace('<', '')
     col = col.replace(',', '')
     col = col.replace('.', '')
@@ -270,6 +271,75 @@ def main():
             schema='sdp',
             if_exists="append",
         )
+
+    print("Processing sdp scores...")
+
+    # download the zip file of all years
+    scores_url = "https://cdn.philasd.org/offices/performance/Open_Data/School_Performance/PSSA_Keystone/PSSA_Keystone_All_Years.zip"
+
+    sdp_data_path = os.path.join('..', 'data', 'schools')
+    scores_table_name = clean_col(f'score')
+
+    scores_all_download_file = os.path.basename(scores_url)
+    list_historical_download_path = os.path.join(sdp_data_path, scores_all_download_file)
+    urllib.request.urlretrieve(scores_url, scores_all_download_file)
+
+    # unzip the file with all years of scores
+    scores_unzip_dir = os.path.basename(scores_url).rstrip('.zip')
+    scores_unzip_path = os.path.join(sdp_data_path, scores_unzip_dir)
+    with zipfile.ZipFile(scores_all_download_file, 'r') as f:
+        f.extractall(scores_unzip_path)
+
+    # build our list of files to process
+    scores_all_files = os.listdir(scores_unzip_path)
+    scores_zip_files = list(filter(lambda p: p != p.rstrip(".zip"), scores_all_files))
+
+    index = 0
+    for scores_zip_file in tqdm(scores_zip_files):
+        if scores_zip_file[0:4] in ['2016']:
+        #if scores_zip_file[0:4] in ['2016', '2017', '2018', '2019']:
+            # 2017-2018 and 2018-2019 data is a different format. I'm so done.
+            # 2019 doesn't exist even. I think I'm going to just use the 2016-2017 data here.
+            index += 1
+            scores_zip_file_path = os.path.join(scores_unzip_path, scores_zip_file)
+            score_file_unzip_dir = os.path.basename(scores_zip_file).rstrip('.zip')
+            score_file_unzip_path = os.path.join(scores_unzip_path, score_file_unzip_dir)
+            with zipfile.ZipFile(scores_zip_file_path, 'r') as f:
+                f.extractall(score_file_unzip_path)
+            scores_year = scores_zip_file[5:9]
+            # 2017 PSSA Keystone Actual (School_S).xlsx
+            scores_file = f"{scores_year} PSSA Keystone Actual (School_S).xlsx"
+            scores_file_path = os.path.join(score_file_unzip_path, scores_file)
+            workbook = openpyxl.load_workbook(scores_file_path)
+            all_students = workbook["All Students"].values
+            # L6 has our secondary headers
+            for i in range(5):
+                next(all_students)
+            scores_subtabs = next(all_students)[1:19]
+            # L7 has our primary headers
+            # col 1 is blank, data ends at S=19
+            scores_cols = list(next(all_students)[1:19])
+            # match subtabs to columns to build something like "Hispanic_percent"
+            for label_idx, label in enumerate(scores_subtabs):
+                if label:
+                    for col_idx in range(len(scores_cols)):
+                        if (col_idx) // 2 == (label_idx) // 2:
+                            scores_cols[col_idx] = label.split('\n')[0] + '_' + scores_cols[col_idx]
+            all_students = [r[1:19] for r in list(all_students)]
+
+            df_all_students = pandas.DataFrame(all_students, columns=scores_cols)
+            df_all_students.rename(columns=clean_col, inplace=True)
+            df_all_students.insert(0, 'school_year', scores_year)
+
+            mode = 'append'
+            if index == 1:
+                mode = 'replace'
+            df_all_students.to_sql(
+                name=scores_table_name,
+                con=engine,
+                schema='sdp',
+                if_exists=mode,
+            )
 
     print("Processing census tract shape files...")
     # TODO consider using the ogr python interface

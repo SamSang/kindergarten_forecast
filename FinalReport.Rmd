@@ -33,8 +33,6 @@ I'll be comparing this conversion rate of the catchment to the household income 
 
 Each of the catchments is effectively one sample. I'll run our statistical analysis on the set of samples for each year.
 
-TODO Download and join the census/ACS data at the lowest granularity that demographic data is available.
-
 
 ## Pipeline
 
@@ -115,7 +113,7 @@ tryCatch({
                  port = dsn_port,
                  user = dsn_uid
                  )
-    #on.exit(dbDisconnect(connec))
+    on.exit(dbDisconnect(connec))
     print("Database Connected!")
     },
     error=function(cond) {
@@ -133,24 +131,49 @@ df_full_compare <- dbGetQuery(connec, full_compare_query)
 df_full_compare$catchment_year <- as.factor(df_full_compare$catchment_year)
 #head(df_full_compare[2:8])
 
-explore_all(df_full_compare, target = ratio)
-explore_all(df_full_compare, target = ratio_delta)
+#explore_all(df_full_compare, target = ratio)
+#explore_all(df_full_compare, target = ratio_delta)
 #explore(df_full_compare)
 
 #head(df_full_compare)
-#pairs(df_full_compare[3:9])
+pairs(df_full_compare[c(3:9,11:12)])
+
+```
+
+
+Births and enrollment are correlated
+
+But there's serious hetroscedasticity.
+
+
+```{r, "Confirm_Assumptions"}
+
+ggplot(df_full_compare, aes(x=total_births, y=total_enrolled)) +
+  geom_point()
+
+# TODO confirm the significance of this correlation, explore the strength
+
+```
+
+
+
+```{r, "Explore_Likely_correlations"}
 
 ggplot(df_full_compare, aes(x=catchment_year, y=ratio, group=catchment_year, color=catchment_year)) +
   coord_flip() +
   geom_boxplot()
 
-# remove outliers that ruin our data
-df.income <- df_full_compare
+# remove outliers that ruin our income data
+df.income <- df_full_compare[c(1,2,3,7)]
 df.income$median_household_income[df.income$median_household_income < -20000] <- NA
 df.income <- subset(df.income, complete.cases(df.income))
 
-ggplot(df.income, aes(x=median_household_income, y=ratio, group=median_household_income, color=median_household_income)) +
+head(df.income)
+
+ggplot(df.income, aes(x=median_household_income, y=ratio)) +
   geom_point()
+
+
 ```
 
 ### Takeaways
@@ -163,7 +186,7 @@ ggplot(df.income, aes(x=median_household_income, y=ratio, group=median_household
 
 Being in a catchment next to a charter school catchment doesn't affect your ratio too much.
 
-```{r}
+```{r, "charter_explore"}
 
 df.charter <- df_full_compare
 
@@ -176,6 +199,16 @@ ggplot(df.charter, aes(x=next_to_charter, y=ratio, fill=catchment_year)) +
 
 ```
 
+
+
+
+```{r, "2016_ela_scores_explore"}
+
+ggplot(df_full_compare, aes(x=pass_percent, y=ratio)) +
+  geom_point()
+
+
+```
 
 
 ```{r, echo=F, "Distribution_of_race"}
