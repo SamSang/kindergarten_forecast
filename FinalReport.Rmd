@@ -113,7 +113,7 @@ tryCatch({
                  port = dsn_port,
                  user = dsn_uid
                  )
-    on.exit(dbDisconnect(connec))
+    #on.exit(dbDisconnect(connec))
     print("Database Connected!")
     },
     error=function(cond) {
@@ -143,7 +143,7 @@ pairs(df_full_compare[c(3:9,11:12)])
 
 Births and enrollment are correlated
 
-But there's serious hetroscedasticity betwee births and enrollment.
+But there's serious hetroscedasticity between births and enrollment.
 
 There's no clear correlation between the year to year changes, unfortunately.
 
@@ -173,8 +173,6 @@ ggplot(df_full_compare, aes(x=catchment_year, y=ratio, group=catchment_year, col
 df.income <- df_full_compare[c(1,2,3,7)]
 df.income$median_household_income[df.income$median_household_income < -20000] <- NA
 df.income <- subset(df.income, complete.cases(df.income))
-
-head(df.income)
 
 ggplot(df.income, aes(x=median_household_income, y=ratio)) +
   geom_point()

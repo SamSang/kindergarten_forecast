@@ -543,7 +543,7 @@ inner join
 
 -- check if district schools overlap with a charter school
 
-drop table if not exists sdp.charter_catchment;
+drop table if exists sdp.charter_catchment;
 
 create table sdp.charter_catchment as
 
