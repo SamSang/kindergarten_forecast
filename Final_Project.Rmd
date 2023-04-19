@@ -1,0 +1,757 @@
+---
+title: "Participation in Philadelphia School District (SDP) kindergartens"
+author: "Eric Peterson"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+  word_document: default
+  html_document:
+    toc: yes
+---
+
+_Who starts going to public school in Philly?_
+
+
+# Introduction
+
+Philadelphia public schools are known for their low [performance](https://public.tableau.com/shared/HK7ZPRBQ9?:display_count=y&:origin=viz_share_link&:embed=y) [compared](https://public.tableau.com/shared/K9GTP6CM7?:display_count=n&:origin=viz_share_link) to the rest of the state. Schools throughout the state are underfunded to the extent that the system of that funding has been declared [unconstitutional](https://pubintlaw.org/wp-content/uploads/2023/02/02.07.23-Memorandum-Opinion-Filed-pubintlaw.pdf). Given the reputation of the city's public schools, who in Philadelphia would send their kids to these schools?
+
+One way to measure what families are choosing public schools is to study data about the school catchments. If we know what catchments are sending more kids to school, most obviously we can start to predict what resources each school needs. This need is especially tricky to predict for kindergarten enrollment because the barrier to entry is higher than matriculating from grade to grade within a school or through a feeder pattern. Identifying trends helps identify outliers. Exceptions to a trend can show where more resources are needed to increase enrollment or highlight models to copy elsewhere.
+
+I am curious if white families are deciding to send their children to SDP kindergarten. Sending a child to kindergarten attaches that child to their class to an extent that I think all families take seriously. When white families send their kids to SDP schools, they tie their own interest to the typically more disadvantaged communities of color around them. This common interest can be a [force for change](https://www.nytimes.com/2020/08/20/podcasts/nice-white-parents-school.html?showTranscript=1) that leads to positive reform. Historically, communities intent on maintaining segregated resources, like pools, have preferred to close facilities rather than integrate (_The Sum of Us_ Heather McGhee 2022). If wealthier, whiter catchments are opting out of SDP schools, that cuts off a historically useful member of the coalition campaigning for equality in education.
+
+I predict that data will confirm the folk wisdom that wealthy white families are opting out of public schools. I predict I can show this by demonstrating that, accounting for differences in births in the catchment, catchments that are more white and areas that have higher median income have lower enrollment.
+
+
+# Methods
+
+## Population
+
+The data available for this project describes the SDP kindergartens in the school years starting in 2016, 2017, 2018 and 2019. Based on the results of the catchments, I hope to draw some conclusions about the population of families in Philadelphia.
+
+
+## Data Sources
+
+1. Births data
+Births data is available from an internet archive of an old version of the City of Philadephia's webpage.
+
+2. Demographics data
+I'll use census tract-level data from the 2010 census to define demographic qualities of SDP catchments at the time of enrollment.
+
+I have considered using census block group-level data from 2010 census. That data is not immediately available throug the census.gov api. Because a major goal of this project for me is the reproduceability of the results and the future use of this dataset for future projects, I've decided to prefer the tract-level data.
+I have also considered using American Community Survey census tract-level data, 5-year estimates from 2010 and 2015. After confirming that the differences over 5 years where not especially meaningful, and that the deltas of qualities of catchments over that 5-year period were not meaningful, I decided to prefer the precision of the census 2010 data.
+
+3. School data
+The SDP District Performance Office (DPO) provides catchment geometries and grade-level information about SDP schools as part of its open data initiative.
+
+
+The resulting data set includes a certain number of schools per year.
+
+|Year|Schools|
+|----|-------|
+|2016|144|
+|2017|144|
+|2018|128|
+|2019|128|
+
+n = 544
+
+
+## Data preparation
+
+To prepare the database and python virtual environment, please refer to the reademe.md file. To load data to the database, activate your virtual environment and run `python load_data.py`.
+
+The data for this project is a combination of data that is tied to the catchment (school data from DPO) and data that is tied to the census tract (births data and demographics data). I have used spatially weighted averages to distribute the qualities of tracts over the overlapping catchment boundaries.
+
+I have assumed that births are equally distributed over each census tract. This assumption will cause variability and will lead to unnecessary variability where population density is not uniform.
+
+I have assumed that schools in 2016 are in the same locations that they were in in 2017. This is a limitation of the available data that I corrected with a quick and simple fix.
+
+I have ignored any negative value from the computation of median household income.
+  
+Because of the COVID-19 pandemic, test results are not available for the 2019-2020 school year. I've chosen to test the most recent year of completed test scores. My reasoning, besides necessity, is that families will have access to the most recent year of scores when deciding where to send their child. This assumption could be wrong in several ways. First, the quality of academics at the school in the year the child attends could be most important. Second, the accumulation of scores could be more important than any individual score. In that case, an average over time would be more helpful. Third, the performance of the kindergarten class when it is tested in third grade could be the more important variable.
+
+When computing census information for SDP catchments, I have weighted the values by space and population. First, I use the area of overlap to allocate the proportion of the population to consider in-catchment from each census tract. Second, I compute how much of the variable (e.g. percent white, median household income) to consider in-catchment. Finally, I sum the variables at the catchment level, where I compute a proportion where necessary (i.e. percent white).
+
+
+## Variables of interest
+
+### Response
+
+The variable to predict
+
+1. total_enrolled
+
+Total enrollment of kindergarten students. This includes students enrolled in the school who live in a different catchment. I am assuming that all of the kindergarteners are enrolled at their catchment school. While I think this is a reasonable assumption, it glosses over an important difference that has a real consequence on the robustness of any model.
+
+DPO provides cross-tabs of grades by school, and of home catchment by school, but it does not provide cross-tabs for home catchment by grade by school. Running this analysis with data for total students enrolled by home catchment by grade would improve this model significantly.
+
+
+### Demographics
+
+Key indicators to describe the qualities of the catchment
+
+2. total_births
+
+  Live births in the calendar year.
+
+  I've decided to use a five-year offset between births and enrollment because that algorithm produces a 75% overlap. A child is eligible for kindergarten at 5 years old in September. Births data is, presumably, calculated by calendar year starting in January.
+
+|Month|Births Year|Kindergarten Year|
+|-|-|
+|01|2011|2016|
+|02|2011|2016|
+|03|2011|2016|
+|04|2011|2016|
+|05|2011|2016|
+|06|2011|2016|
+|07|2011|2016|
+|08|2011|2016|
+|09|2011|2017|
+|10|2011|2017|
+|11|2011|2017|
+|12|2011|2017|
+
+  I assume that births are distributed over months equally.
+
+  This assumption can produce a great deal of variation. Births might change significantly year to year because of random variability month to month. We could be counting a significant number of births in November 2011 as kindergarten year 2016 that will show up as enrollments in kindergarten year 2017.
+
+  I assume that "redshirting" is uniform over years.
+
+  Families have latitude in when they decide to send children to school. A child born in August 2011 could go to school when they are 6 instead of 5. Commentators have started using ["redshirt"](https://www.parentdata.org/p/back-to-school-q-and-a-redshirting) to describe this practice. I think it's reasonable to assume that the redshirts from 2016 to 2017 will take the seats of the redshirts from 2017 to 2018.
+
+
+3. pct_white
+
+  The percent of the population that identifies as white alone.
+
+4. pct_black
+
+  The percent of the population that identifies as black alone.
+  
+  I've explored using the percent that identifies only as Asian and I've considered loading the percent of white Hispanic. Based on the weak predictive value of pct_Asian, I'm not confident that building out the data model for Hispanic will end up being used in this model.
+
+5. median_household_income
+
+  The median income of households in the catchment. This variable is a weighted average by space and by population.
+
+6. median_household_income_diff
+
+  The difference between the highest median household income in the catchment and the lowest median household income in the catchment.
+
+  To be considered in-catchment, the tract must be 10% in the catchment. This removes trivial overlaps of tracts with catchments.
+
+  I've considered changing the overlap threshold to 5% or 30%. Raising the threshold reduces the range and variability while decreasing the threshold increases the range and variability, unsurprisingly. However, those changes do not change the shape or trend of the data. I chose 10% as the threshold because it represents a middle ground of the distribution.
+
+
+### Quality of the school
+
+Attributes specific to what is going on inside the school and when the data is taken
+
+7. catchment_year
+
+  The start year of the school year. For example, the 2016-2017 school year began in late August, 2016. I've coded that year as "2016". This year is stored numerically to allow for this variable to account for a trend over time.
+
+8. cumulative_tenure
+
+  The consecutive years a school leader (principal) has been on the job. The first year is considered 1.
+
+9. pass_percent
+
+  The percentage of third graders scoring a 3 or 4 (a passing grade) on the PSSA English and Language Arts standardized test.
+
+
+### Location of the school
+
+Information about the location of the school in the built environment
+
+10. population_density
+
+  The number of residents per acre.
+
+11. contains_charter
+
+  A 0 or 1 boolean set to 1 when there is any charter school offering kindergarten enrollment in the SDP catchment.
+
+12. charter_distance
+
+  The distance in feet from the point location of the SDP school to the nearest charter school offering kindergarten enrollment.
+
+    TODO provide basic descriptive statistics (histograms, key estimate values)
+    
+##  Methods for variable selection
+
+    Methods for variable selection: what procedure will be used to select the final variables in the model (cor plot, vif, stepwise regression, etc)
+    
+First, I'll use a correlation matrix to review the correlations. If an arbitrary threshold removes too many variables, I'll implement a backward stepwise regression. I'll then check the variables in the resulting stepwise regression for colinearity by examining the variable inflation factor (VIF) values. I'll remove those variables and check if any variables removed in the stepwise regression could be added back.
+    
+## Model implementation
+    
+I'll implement a linear model in R using the `lm` function. The resulting function will predict the natural log of enrollment. I'll consider the natural log of median household income as possible variable, but other variables will be un-transformed.
+    
+## Model selection
+
+I'll review models first by selecting a model whose F-test is significant and whose coefficients we can safely say are not zero. I'll prefer models with greater adjusted R-squared for their greater predictive power. I'll confirm that variables are not colinear with one another using both VIF.
+
+## Model evaluation
+
+When one model emerges as an optimization of the significance of its parameters and is not colinear, I'll review plots of variables against one another to confirm there is no colinearity. Finally, I'll review the plots of residuals to confirm that the model is linear, residuals are normally distributed, variation is consistent over the range of the model and outliers are not exerting outsized influence.
+
+The final model will have a large adjusted R-squared, low p-level from the model's F-test, low p-level from each coefficient's t-test, minimal colinearity and randomly distributed residuals.
+
+# Results
+
+To begin, I import data from a local database built by `load_data.py`.
+
+```{r, include=F, results=F, "01_create_connection"}
+
+library(RPostgreSQL)
+library(ggplot2)
+library(tidyr)
+library(dplyr)
+library(car)
+library(corrplot)
+library(dotwhisker)
+library(labelled)
+
+dsn_database <- 'sdp'
+dsn_hostname <- 'localhost'
+dsn_port <- 5432
+
+tryCatch({
+    drv <- dbDriver("PostgreSQL")
+    print("Connecting to Database…")
+    connec <- dbConnect(drv, 
+                 dbname = dsn_database,
+                 host = dsn_hostname, 
+                 port = dsn_port
+                 )
+    #on.exit(dbDisconnect(connec))
+    print("Database Connected!")
+    },
+    error=function(cond) {
+            print("Unable to connect to Database.")
+    })
+
+query <- "select * from public.comparison"
+
+df_full <- dbGetQuery(connec, query)
+
+dbDisconnect(connec)
+
+```
+
+I then select the variables of interest to a dataframe. I create a new column for the natural log of `total_enrolled` and remove the original `total_enrolled` column.
+
+```{r, include=F, "02_create_df"}
+
+df <- df_full[c(1, 4, 5, 6, 7, 11, 12, 13, 14, 17, 18, 19, 20, 21)]
+
+# remove data for the one school that goes k-2 and does not have grade 3 standardized test scores
+df <- subset(df, complete.cases(df))
+
+# create column that is log(total_enrolled)
+df$log_total_enrolled <- log(df$total_enrolled)
+df <- df[ , -which(names(df) %in% c("total_enrolled"))]
+
+```
+
+
+## Correlation plot
+
+I create and review the correlation matrix of the remaining variables.
+
+```{r, echo=F, "03_print_corplot"}
+
+
+cormat=cor(df, method="pearson")
+corrplot(cormat, method = 'number', order = 'alphabet', type = 'upper', number.cex=0.5, tl.cex=0.5)
+
+```
+
+
+## Selct highly correlated variables
+
+I remove variables that have an absolute correlation coefficient lower than 0.3.
+
+
+```{r, echo=F, "03_low_correlation"}
+
+# get correlations to log_total_enrolled
+correlations <- cormat[14,]
+
+threshold <- 0.3
+
+low_correlation_vars <- sort(names(which(abs(correlations) < threshold )))
+
+low_correlation_vars
+
+df_hi_correlation <- df[ , -which(names(df) %in% low_correlation_vars)]
+
+```
+
+## Preliminary Summary
+
+I create summary statistics of a preliminary model after removing low correlation variables.
+
+```{r, "04_preliminary_model"}
+
+model.hi_correlation <- lm(log_total_enrolled ~ . , data=df_hi_correlation)
+
+summary(model.hi_correlation)
+
+```
+
+
+## VIF collinearity test
+
+
+```{r, "05_vif_colinearity"}
+
+vif.hi_correlation <- vif(model.hi_correlation)
+
+vif.hi_correlation
+
+names(which(vif.hi_correlation > 4))
+
+```
+
+No variables are highly correlated.
+
+
+## Evaluate
+
+Because the model with only highly correlated values leaves me with so few variables, I'm going to restart analysis with the full set of variables.
+
+```{r, echo = F, "06_model_iteration"}
+
+model.all <- lm(log_total_enrolled ~ . , data=df)
+
+summary(model.all)
+
+```
+
+There certainly seem to be some variables that are not correlated. I'll implement the `step` algorithm to programmatically search for a model with the best AIC.
+
+```{r, echo=F, message=F, results=F, "07_model_iteration"}
+
+model.step <- step(lm(log_total_enrolled ~ . , data = df), direction = "backward")
+
+summary(model.step)
+
+vif.model.step <- vif(model.step)
+
+vif.model.step
+
+names(which(vif.model.step > 4))
+
+```
+
+The percent black and white residents are highly correlated. This isn't news to anyone aware of the history of racial segregation in American cities (_The Color of Law_  Richard Rothstein, Liveright 2017). Though the raw correlation of `pct_black` is higher, I'm curious about the behavior of white families, so initially I'll retain `pct_white`.
+
+When I remove `pct_black`, the p-level of `pass_percent` increases to more then 10%. That variable needs to be removed.
+
+I am curious if adding back any variables could improve the model, specifically around its residuals. I considered adding back `median_household_income`, which slightly improves the adjusted R-squared in a statistically meaningful way and strengthens my assumption of resulting values being normally distributed. 
+
+
+```{r, echo=F, include=F, "08_model_iteration"}
+
+in_step_model <- names(coefficients(model.step))[-1]
+in_step_model <- append(in_step_model, "log_total_enrolled")
+
+df.model.1 <- df[ , which(names(df) %in% in_step_model)]
+
+# remove pct_black
+df.model.1 <- df.model.1[ , -which(names(df.model.1) %in% c("pct_black"))]
+
+model.1 <- lm(log_total_enrolled ~ . , data = df.model.1)
+
+#summary(model.1)
+
+#vif(model.1)
+
+
+
+df.model.2 <- df.model.1[ , -which(names(df.model.1) %in% names(which(summary(model.1)$coefficients[, 4] > 0.01)))]
+
+model.2 <- lm(log_total_enrolled ~ . , data = df.model.2)
+
+#summary(model.2)
+
+#vif(model.2)
+
+#plot(model.2)
+
+
+in_model.3 <- names(coefficients(model.2))[-1]
+in_model.3 <- append(in_model.3, "log_total_enrolled")
+in_model.3 <- append(in_model.3, "median_household_income")
+
+df.model.3 <- df[ , which(names(df) %in% in_model.3)]
+
+model.3 <- lm(log_total_enrolled ~ . , data = df.model.3)
+
+#summary(model.3)
+
+#vif(model.3)
+
+# the improvement using median_household_income is significant
+#anova(model.3, model.2)
+
+```
+
+However, `median_household_income` is strongly correlated with income inequality, distance from charter school and percent white. (It's not as strongly correlated with population density.) I am forced to instead use my second model, which does not include `median_household_income`.
+
+
+```{r, echo = F, include=F, "09_Covariance_of_Income"}
+
+
+# inequality to raw income
+model.income.inequality <- lm(median_household_income_diff ~ median_household_income, data = df.model.3)
+
+ggplot(df.model.3, aes(x=median_household_income, y=median_household_income_diff)) +
+  geom_point() +
+  ggtitle("Inequality to raw income") +
+  geom_abline(intercept = coefficients(model.income.inequality)[1],
+              slope = coefficients(model.income.inequality)[2])
+
+summary(model.income.inequality)$adj.r.squared
+
+# charter distance to median income
+model.income.distance <- lm(charter_distance ~ median_household_income, data = df.model.3)
+
+ggplot(df.model.3, aes(x=median_household_income, y=charter_distance)) +
+  geom_point() +
+  ggtitle("Charter Distance to raw income") +
+  geom_abline(intercept = coefficients(model.income.distance)[1],
+              slope = coefficients(model.income.distance)[2])
+
+summary(model.income.distance)$adj.r.squared
+
+# population density to median income
+model.income.density <- lm(population_density ~ median_household_income, data = df.model.3)
+
+ggplot(df.model.3, aes(x=median_household_income, y=population_density)) +
+  geom_point() +
+  ggtitle("Population density to raw income") +
+  geom_abline(intercept = coefficients(model.income.density)[1],
+              slope = coefficients(model.income.density)[2])
+
+summary(model.income.density)$adj.r.squared
+
+# pct_white to median_household_income
+model.income.white <- lm(pct_white ~ median_household_income, data = df.model.3)
+
+ggplot(df.model.3, aes(x=median_household_income, y=pct_white)) +
+  geom_point() +
+  ggtitle("Percent white to raw income") +
+  geom_abline(intercept = coefficients(model.income.white)[1],
+              slope = coefficients(model.income.white)[2])
+
+summary(model.income.white)$adj.r.squared
+
+```
+I have also checked other possible correlations:
+
+- `total_births` to `population_density`
+- `charter_distance` to `pct_white`
+- `charter_distance` to `population_density`
+
+Each of these correlations has an R-squared of about or less than 0.10.
+
+```{r, echo=F, include=F, "10_Covariance_of_Others"}
+
+# births to population density
+model.dense.births <- lm(total_births ~ population_density, data = df.model.3)
+
+ggplot(df.model.3, aes(x=population_density, y=total_births)) +
+  geom_point() +
+  ggtitle("Total births to Population Density") +
+  geom_abline(intercept = coefficients(model.dense.births)[1],
+              slope = coefficients(model.dense.births)[2])
+
+summary(model.dense.births)$adj.r.squared
+
+
+# charter distance to pct white
+model.disance.white <- lm(pct_white ~ charter_distance, data = df.model.3)
+
+ggplot(df.model.3, aes(x=charter_distance, y=pct_white)) +
+  geom_point() +
+  ggtitle("Percent white to charter distance") +
+  geom_abline(intercept = coefficients(model.disance.white)[1],
+              slope = coefficients(model.disance.white)[2])
+
+summary(model.disance.white)$adj.r.squared
+
+
+```
+
+
+There's a stronger case for covariance of `pct_white` with both `population_density` and to a greater extent `median_household_income_diff`. While they are certainly all symptoms of a segregated city, each variable has distinct meaning.
+
+
+```{r, echo=F, include=F, "11_Covariance_of_white"}
+
+# white percent population density
+model.disance.density <- lm(pct_white ~ population_density, data = df.model.3)
+
+ggplot(df.model.3, aes(x=population_density, y=pct_white)) +
+  geom_point() +
+  ggtitle("Percent white to population density") +
+  geom_abline(intercept = coefficients(model.disance.density)[1],
+              slope = coefficients(model.disance.density)[2])
+
+summary(model.disance.density)$adj.r.squared
+
+# white percent income inequality
+model.white.inequality <- lm(pct_white ~ median_household_income_diff, data = df.model.3)
+
+ggplot(df.model.3, aes(x=median_household_income_diff, y=pct_white)) +
+  geom_point() +
+  ggtitle("Percent white to inequality") +
+  geom_abline(intercept = coefficients(model.white.inequality)[1],
+              slope = coefficients(model.white.inequality)[2])
+
+summary(model.white.inequality)$adj.r.squared
+
+```
+
+I am concerned that `pct_white` is too closely correlated with both income inequality and distance from charter school. To be diligent, I'm going to return to model from the backwards stepwise regression and this time retain `pct_black`.
+
+Similar to the process for retaining percent white, the significance of `pass_percent` evaporates when the race variable is removed. However, the adjusted R-squared for this model is higher than the iteration of the model that retains percent white.
+
+After reviewing the standardized parameter plot and the hetrosecasdicity of the errors, I've decided to remove `cumulative_tenure`. This variable has a significant affect on the model. However, I've determined that choosing a more parsimonious model and a model with slightly less hetrosecasdicity is worth the loss of a little predictive power and a slight trend in the leverage plot.
+
+```{r, echo=F, "12_Retain_Black"}
+
+df.model.4 <- df[ , which(names(df) %in% in_step_model)]
+
+# remove pct_white
+df.model.4 <- df.model.4[ , -which(names(df.model.4) %in% c("pct_white"))]
+
+model.4 <- lm(log_total_enrolled ~ . , data = df.model.4)
+
+
+# remove statistically insignificant parameter pass_percent
+df.model.5 <- df.model.4[ , -which(names(df.model.4) %in% names(which(summary(model.4)$coefficients[, 4] > 0.01)))]
+
+model.5 <- lm(log_total_enrolled ~ . , data = df.model.5)
+
+#summary(model.5)
+
+
+# remove cumulative tenure after reviewing the standardized coefficient plot.
+df.model.6 <- df.model.5[ , -which(names(df.model.5) %in% c("cumulative_tenure"))]
+
+model.6 <- lm(log_total_enrolled ~ . , data = df.model.6)
+
+summary(model.6)
+
+#anova(model.6, model.5)
+
+#plot(model.6)
+
+
+```
+I'll review the correlation between `pct_black` and the variables that were strongly correlated to pct_white to check if we've swapped one cocorrelated variable for another.
+
+The results of plots of percent black against population density, income inequality and distance to charter school show that this variable is less correlated to black than percent white is. The VIF of all variables is lower in this model than in the model that includes percent white.
+
+```{r, include=F, "13_Covariance_of_Black"}
+
+# black percent population density
+model.black.density <- lm(pct_black ~ population_density, data = df.model.5)
+
+ggplot(df.model.5, aes(x=population_density, y=pct_black)) +
+  geom_point() +
+  ggtitle("Percent black to population density") +
+  geom_abline(intercept = coefficients(model.black.density)[1],
+              slope = coefficients(model.black.density)[2])
+
+summary(model.black.density)$adj.r.squared
+
+# black percent income inequality
+model.black.inequality <- lm(pct_black ~ median_household_income_diff, data = df.model.5)
+
+ggplot(df.model.5, aes(x=median_household_income_diff, y=pct_black)) +
+  geom_point() +
+  ggtitle("Percent black to inequality") +
+  geom_abline(intercept = coefficients(model.black.inequality)[1],
+              slope = coefficients(model.black.inequality)[2])
+
+summary(model.black.inequality)$adj.r.squared
+
+# black percent charter distance
+model.black.distance <- lm(pct_black ~ charter_distance, data = df.model.5)
+
+ggplot(df.model.5, aes(x=charter_distance, y=pct_black)) +
+  geom_point() +
+  ggtitle("Percent black to charter distance") +
+  geom_abline(intercept = coefficients(model.black.distance)[1],
+              slope = coefficients(model.black.distance)[2])
+
+summary(model.black.distance)$adj.r.squared
+
+
+```
+
+
+
+
+
+## Final model
+
+### Summary
+
+I'm left with my second iteration as a final model.
+
+The overall p-value of the model is quite small. The adjusted R-squared is 0.57, which means the model has enough predictive power to be relevant. The p-value for each coefficient is small (< 0.001 for all except `cumulative_tenure`), so I am confident that no coefficient could be zero.
+
+The residual plots look mostly random. There is notable deviation from a normal distribution in the QQ-line. Scale Location shows a touch of hetrosecasdicisty. Overall, plots of the residuals do not have striking trends.
+
+
+```{r, echo=F, "14_final_model_summary"}
+
+model.final <- model.6
+df.final <- df.model.6
+
+# list the names of the variables included
+#names(coefficients(model.final))[-1]
+
+summary(model.final)
+
+# including median_household_income improves the residuals
+plot(model.final)
+
+```
+
+### Variable Inflation Factors
+
+The variable inflation factors for all variables are low and comparable. I am confident that I've avoided colinearity because I've reviewed the grid of plots of all variables against one another and investigated likely co-correlates.
+
+```{r, "15_final_model_vif"}
+
+vif.final <- vif(model.final)
+
+# set the margins to not cut off my variable names
+par(mar=c(2,13,4,2))
+# create horizontal bar chart to display each VIF value
+barplot(vif.final, main = "VIF Values", horiz = TRUE, col = "steelblue", las = 1, xlim = c(0, 6))
+# add vertical line at 5
+abline(v = 5, lwd = 3, lty = 2)
+
+```
+
+
+### Comparison to Enrollment Alone
+
+We know from preliminary analysis that births alone can explain >40% of the variation in enrollment in a catchment. One comprehensive check would be to confirm that the final model is significantly more predictive than the the births alone model. Running an ANOVA check between the two models, we can see that we do not have evidence to support the hypothesis that both models are equally predictive.
+
+
+```{r, include=FALSE, echo=F, "16_Births_Enrollment"}
+
+model.births.enrolment <- lm(log_total_enrolled ~ total_births, data = df.model.2)
+
+ggplot(df.model.2, aes(x=total_births, y=log_total_enrolled)) +
+  geom_point() +
+  ggtitle("Total births to enrollment") +
+  geom_abline(intercept = coefficients(model.births.enrolment)[1],
+              slope = coefficients(model.births.enrolment)[2])
+
+summary(model.births.enrolment)$adj.r.squared
+
+anova(model.births.enrolment, model.final)
+
+```
+
+### Standardized error
+
+Births is clearly the most influential variable. Income inequality ranks highly, above percent black and charter distance. Population density and the trend over time are significant but contribute less strongly to the model.
+
+```{r, "16_Standardized_Error"}
+
+z.score=function(x){
+  z=(x-mean(x))/sd(x)
+  return(z)
+}
+
+df.final.z <- data.frame(apply(cbind(df.final[names(df.final)]), 2, FUN=z.score) )
+
+names(df.final.z) <- names(df.final)
+
+model.final.z <- lm(log_total_enrolled ~ . , data = df.final.z)
+
+dwplot(model.final.z)
+
+coefficients((model.final.z))[-1]
+
+```
+
+### Robustness
+
+This model is generally robust. While `total_births` is by far the most predictive variable, the additional variables together boost the predictive power by more almsot 15 percentage points. The final model has a low p-level from its F-test and a low p-value for each of its coefficients. This model can tell us something useful.
+
+
+# Discussion
+
+The model does not support my hypothesis that white families are opting out of public kindergarten. It does, however, indicate that where income inequality is high enrollment is lower. This could possibly support my hypothesis that wealthy families are opting out of public school - but that conclusion is not certain.
+
+  Perhaps most surprisingly, my selected model does not include the percent of white residents. Rather, a higher percent of black residents is correlated with fewer SDP kindergarten enrollments. This highlights to a key methodological limitation of this analysis: we observe the aggregate behavior of the catchment but we do not know who within that catchment enrolled in kindergarten.
+
+  I had predicted that median household income would predict enrollment of a catchment. Median household income ended up being too colinear with other variables to include in the model. My measure of income inequality was the second most predictive variable. It's difficult to imagine a world where the families opting out of public kindergarten aren't the families at the upper end of that inequality.
+
+
+  More births in a catchment somewhat obviously positively correlated with enrollments. This variable has an outsized strength in the model. This suggests that families have already made decisions about their child's education by moving to the catchment of the school of their choice before their child is born. The strong correlation could point to the inertia of the "default" of attending public school.
+
+
+  The distance a school is from the nearest charter school is positively correlated with enrollments. When alternatives schools are farther away, that creates a barrier to choosing one of those alternatives.
+
+
+  More dense neighborhoods correspond to more enrollments. A simple explanation could be that in a dense neighborhood, sending children to a physical school, located perhaps in dense, legacy neighborhoods, are easier to access than schools farther away. The effect of ditance to the nearest school would be magnified where walking is the norm. I will also suggest that this correlation gets at some intangible piece of culture rather than a direct effect of the built environment. When families are physically closer to their neighbors, they might be more likely to support a public service like SDP kindergarten.
+
+
+  As years go by, there is a negative correlation with enrollment. Something is happening over time that enrollment is decreasing. This is significant because we are controlling for births, which are understood in aggregate to be leading to lower enrollments throughout the country. Perhaps the accumulation of charter school marketing is having an effect of families' decisions. Perhaps other factors, like public safety, cost of living or gentrification by childless households is having an effect.
+
+
+  I'll note that this model predicts the natural log of enrollments - not the raw enrollments. This suggests that These correlations are exponential. Each effect is magnified at higher enrollment counts.
+
+
+## Limitations and Extensions
+
+A major issue with analyzing behavior aggregated at the catchment level is that we do not have a way to analyze the behavior of subsets of families. While the births data provides crosstabs by race, the enrollment data from DPO does not provide race crosstabs for kindergarten enrollment. That limitation of the data hampers this analysis.
+
+One possibility to answer questions relevant to who is enrolling in SDP kindergarten is to conduct a survey of families. This would provide a level of granularity that public data analysis cannot.
+
+A further hindrance is the availability of data over time. The latest birth data is 2014, conveniently five years before the last year of enrollment before the COVID-19 pandemic. The best way to increase this sample size would be to scale it over more years. The data model and the analysis in this workbook are built to easily accommodate additional years if/when they become available.
+
+One possible avenue to address this consideration is to request births data from the city. It may be possible to have births coded specifically by catchment, which would reduce variance due to the presumably random pattern of births in census tracts.
+
+This analysis could be extended to include more variables from the census, like percent of residents who are Hispanic and home value. The City of Philadelphia provides [various](https://controller.phila.gov/philadelphia-audits/progressphl/#/scorecards) [indecies](https://phl.maps.arcgis.com/home/item.html?id=e69f51885f4f4744b27a88a3901be0fd) that might be useful to capture more information about the built environment.
+
+
+# Conclusion
+
+The finding that higher percentage of black residents in a catchment is correlated with lower SDP kindergarten enrollment might seem counterintuitive. Conversely, from our preliminary analysis, we know that higher percentage of white residents in a catchment is correlated with higher enrollment. This inverse relationship between percent black and percent white makes sense given the strong inverse relationship between percent white and percent black.
+
+I can suggest several ways to explain this finding. First, in the city of Philadelphia, a higher percent white might be an indicator of integration. Families in more integrated neighborhoods are more likely to believe their schools are high quality.
+
+Second, there could be a flaw in the model. I'll recall that higher income is associated with lower enrollment - except in the upper quantiles of income, where more income seems correlated with higher enrollment. When checking the correlation between variables, the correlation between percent white and median household income was unacceptably high. It could be that race is tells us something similar to income.
+
+The correlation of race, however, is not strong enough to produce a high VIF or a stronger correlation than percent white with income. The data may be telling us something about different attitudes. Black and other non-white families could be more skeptical of government services, specifically a notoriously unequal education system, and therefore are more likely to seek alternatives.
+
+Finally, charter schools could simply not be targeting families in catchments that are more white. It's impossible to be conclusive without studying the behavior of specific families.
+
+The relative strength of difference in income and distance to the closest charter school, and perhaps population density, suggest to me that alternatives matter. When a family has resources to send their child to a different school, either because they have the means to afford private school, the means to leave the city or the option to attend a charter school, they take that option. The relative strength of the correlation between income inequality and enrollment suggests to me one of two things. First, where a catchment is on a boundary, families might try to send their child to a school on the other side of the boundary. Second, families with means might be motivated to against sending their child to the local SDP kindergarten.
+
+The troubling trend over time of declining SDP kindergarten enrollment is an issue stakeholders in public schools have certainly noted. As much as alternatives matter, culture and attitudes also matter. We can build coalitions that reverse trends over time.
+
+
+
+```{r, include=F, ""}
+
+
+
+```
+

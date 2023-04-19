@@ -35,6 +35,7 @@ def clean_col(col: str):
     col = col.replace(',', '')
     col = col.replace('.', '')
     col = col.replace('-', '_')
+    col = col.replace('/', '_')
     col = col.replace('\n', '_')
     col = col.replace('#', '')
     col = col.replace('%', '')
@@ -194,9 +195,9 @@ def main():
 
         list_historical = list_historical_workbook[list_sheet].values
 
-        list_historical_cols = list(next(list_historical)[0:27])
+        list_historical_cols = list(next(list_historical)[0:57])
 
-        list_historical = [r[0:27] for r in list(list_historical)]
+        list_historical = [r[0:57] for r in list(list_historical)]
 
         df_list_historical = pandas.DataFrame(list_historical, columns=list_historical_cols)
         df_list_historical.rename(columns=clean_col, inplace=True)
@@ -210,6 +211,7 @@ def main():
             "school_year",
             "pa_code",
             "ulcs_code",
+            "publication_name",
             "admission_type",
             "current_grade_span_served",
             "school_level",
@@ -217,8 +219,11 @@ def main():
             "school_region_code",
             "school_region",
             "year_closed",
+            "gps_location",
+            "school_leader_name",
         ]
         df_list_historical = df_list_historical.filter(list_keep_cols, axis=1)
+        df_list_historical["gps_location"] = df_list_historical.get("gps_location", None)
 
         if list_year != "multi":
             # make the school_year column equal the value we passed in
@@ -255,6 +260,7 @@ def main():
             "school_year",
             "pa_code",
             "ulcs_code",
+            "publication_name",
             "admission_type",
             "current_grade_span_served",
             "school_level",
@@ -262,6 +268,8 @@ def main():
             "school_region_code",
             "school_region",
             "year_closed",
+            "gps_location",
+            "school_leader_name",
         ]
         df_list_historical = df_list_historical.filter(list_keep_cols, axis=1)
 
@@ -296,7 +304,7 @@ def main():
 
     index = 0
     for scores_zip_file in tqdm(scores_zip_files):
-        if scores_zip_file[0:4] in ['2016']:
+        if scores_zip_file[0:4] in ['2015', '2016', '2017', '2018']:
         #if scores_zip_file[0:4] in ['2016', '2017', '2018', '2019']:
             # 2017-2018 and 2018-2019 data is a different format. I'm so done.
             # 2019 doesn't exist even. I think I'm going to just use the 2016-2017 data here.
@@ -311,24 +319,49 @@ def main():
             scores_file = f"{scores_year} PSSA Keystone Actual (School_S).xlsx"
             scores_file_path = os.path.join(score_file_unzip_path, scores_file)
             workbook = openpyxl.load_workbook(scores_file_path)
-            all_students = workbook["All Students"].values
-            # L6 has our secondary headers
-            for i in range(5):
-                next(all_students)
-            scores_subtabs = next(all_students)[1:19]
-            # L7 has our primary headers
-            # col 1 is blank, data ends at S=19
-            scores_cols = list(next(all_students)[1:19])
-            # match subtabs to columns to build something like "Hispanic_percent"
-            for label_idx, label in enumerate(scores_subtabs):
-                if label:
-                    for col_idx in range(len(scores_cols)):
-                        if (col_idx) // 2 == (label_idx) // 2:
-                            scores_cols[col_idx] = label.split('\n')[0] + '_' + scores_cols[col_idx]
-            all_students = [r[1:19] for r in list(all_students)]
+            if int(scores_year) <= 2017:
+                all_students = workbook["All Students"].values
+                # L6 has our secondary headers
+                for i in range(5):
+                    next(all_students)
+                scores_subtabs = next(all_students)[1:19]
+                # L7 has our primary headers
+                # col 1 is blank, data ends at S=19
+                scores_cols = list(next(all_students)[1:19])
+                # match subtabs to columns to build something like "Hispanic_percent"
+                for label_idx, label in enumerate(scores_subtabs):
+                    if label:
+                        for col_idx in range(len(scores_cols)):
+                            if (col_idx) // 2 == (label_idx) // 2:
+                                scores_cols[col_idx] = label.split('\n')[0] + '_' + scores_cols[col_idx]
+                all_students = [r[1:19] for r in list(all_students)]
 
-            df_all_students = pandas.DataFrame(all_students, columns=scores_cols)
-            df_all_students.rename(columns=clean_col, inplace=True)
+                df_all_students = pandas.DataFrame(all_students, columns=scores_cols)
+                df_all_students.rename(columns=clean_col, inplace=True)
+            if int(scores_year) > 2017:
+                all_students = workbook["Sheet1"].values
+                scores_cols = list(next(all_students)[0:19])
+                all_students = [r[0:19] for r in list(all_students)]
+                scores_field_map = {
+                    "src_school_id": "school_code",
+                    "school_id": "school_code",
+                    "count_below_basic": "level_1_count",
+                    "percent_below_basic": "level_1_percent",
+                    "count_basic": "level_2_count",
+                    "percent_basic": "level_2_percent",
+                    "count_proficient": "level_3_count",
+                    "percent_proficient": "level_3_percent",
+                    "count_advanced": "level_4_count",
+                    "percent_advanced": "level_4_percent",
+                    "count_prof_adv": "levels_3_and_4_count",
+                    "percent_prof_adv": "levels_3_and_4_percent",
+                }
+
+                df_all_students = pandas.DataFrame(all_students, columns=scores_cols)
+                df_all_students.rename(columns=clean_col, inplace=True)
+
+                df_all_students.rename(columns=scores_field_map, inplace=True)
+
             df_all_students.insert(0, 'school_year', scores_year)
 
             mode = 'append'
@@ -340,44 +373,6 @@ def main():
                 schema='sdp',
                 if_exists=mode,
             )
-
-    print("Processing census tract shape files...")
-    # TODO consider using the ogr python interface
-    # http://pcjericks.github.io/py-gdalogr-cookbook/vector_layers.html#create-a-postgis-table-from-wkt
-    print("Processing 2010")
-    subprocess.run(
-        [
-            'ogr2ogr',
-            '-f', 'PostgreSQL',
-            f'Pg:dbname={db} host=localhost port=5432 user={user}',
-            '-lco', f'SCHEMA={census_schema}',
-            '-lco', 'OVERWRITE=YES',
-            '-nlt', 'PROMOTE_TO_MULTI',
-            '-sql', "select 2010 as year, tractce10 as tractce, geoid10 as geoid, name10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_tract10 where countyfp10 = '101'",
-            '-t_srs', 'EPSG:2272',
-            '-nln', 'tract',
-            '/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_42101_tract10.zip',
-        ],
-        check=True,
-    )
-
-    print("Processing census block group shape files...")
-    print("Processing 2010")
-    subprocess.run(
-        [
-            'ogr2ogr',
-            '-f', 'PostgreSQL',
-            f'Pg:dbname={db} host=localhost port=5432 user={user}',
-            '-lco', f'SCHEMA={census_schema}',
-            '-lco', 'OVERWRITE=YES',
-            '-nlt', 'PROMOTE_TO_MULTI',
-            '-sql', "select 2010 as year, tractce10 as tractce, blkgrpce10 as blkgrpce, geoid10 as geoid, namelsad10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_bg10 where countyfp10 = '101'",
-            '-t_srs', 'EPSG:2272',
-            '-nln', 'block_group',
-            '/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/BG/2010/tl_2010_42101_bg10.zip',
-        ],
-        check=True,
-    )
 
     print("Process block group data...")
     """
@@ -406,22 +401,24 @@ def main():
             ],
         },
         "acs_2010": {
-            "url": "https://api.census.gov/data/2010/acs/acs5?get=NAME,B00002_001E,B19013_001E&for=tract:*&in=state:42&in=county:101&key={census_key}",
+            "url": "https://api.census.gov/data/2010/acs/acs5?get=NAME,B00002_001E,B19013_001E,B19013_001M&for=tract:*&in=state:42&in=county:101&key={census_key}",
             "fields": [
                 "Name",
                 "Total Households",
                 "Median Household Income",
+                "Median Household Income Margin",
                 "state",
                 "county",
                 "tract",
             ],
         },
         "acs_tract_2015": {
-            "url": "https://api.census.gov/data/2015/acs/acs5?get=NAME,B00002_001E,B19013_001E&for=tract:*&in=state:42&in=county:101&key={census_key}",
+            "url": "https://api.census.gov/data/2015/acs/acs5?get=NAME,B00002_001E,B19013_001E,B19013_001M&for=tract:*&in=state:42&in=county:101&key={census_key}",
             "fields": [
                 "Name",
                 "Total Households",
                 "Median Household Income",
+                "Median Household Income Margin",
                 "state",
                 "county",
                 "tract",
@@ -512,6 +509,44 @@ def main():
             ],
             check=True,
         )
+
+    print("Processing census tract shape files...")
+    # TODO consider using the ogr python interface
+    # http://pcjericks.github.io/py-gdalogr-cookbook/vector_layers.html#create-a-postgis-table-from-wkt
+    print("Processing 2010")
+    subprocess.run(
+        [
+            'ogr2ogr',
+            '-f', 'PostgreSQL',
+            f'Pg:dbname={db} host=localhost port=5432 user={user}',
+            '-lco', f'SCHEMA={census_schema}',
+            '-lco', 'OVERWRITE=YES',
+            '-nlt', 'PROMOTE_TO_MULTI',
+            '-sql', "select 2010 as year, tractce10 as tractce, geoid10 as geoid, name10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_tract10 where countyfp10 = '101'",
+            '-t_srs', 'EPSG:2272',
+            '-nln', 'tract',
+            '/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_42101_tract10.zip',
+        ],
+        check=True,
+    )
+
+    print("Processing census block group shape files...")
+    print("Processing 2010")
+    subprocess.run(
+        [
+            'ogr2ogr',
+            '-f', 'PostgreSQL',
+            f'Pg:dbname={db} host=localhost port=5432 user={user}',
+            '-lco', f'SCHEMA={census_schema}',
+            '-lco', 'OVERWRITE=YES',
+            '-nlt', 'PROMOTE_TO_MULTI',
+            '-sql', "select 2010 as year, tractce10 as tractce, blkgrpce10 as blkgrpce, geoid10 as geoid, namelsad10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_bg10 where countyfp10 = '101'",
+            '-t_srs', 'EPSG:2272',
+            '-nln', 'block_group',
+            '/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/BG/2010/tl_2010_42101_bg10.zip',
+        ],
+        check=True,
+    )
 
     engine.dispose()
 

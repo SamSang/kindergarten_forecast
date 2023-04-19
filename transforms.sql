@@ -3,22 +3,115 @@ PostGIS pipeline to create intersections of census and catchment data
 */
 
 
+-- create school locations as points
+
+drop table if exists sdp.school_location;
+
+create table sdp.school_location as
+	select
+		school_year,
+		cast(substring(school_year, 1, 4) as integer) as start_year,
+		ulcs_code,
+		publication_name as school_name,
+		school_region,
+		current_grade_span_served,
+		lower(governance) as governance,
+		gps_location,
+		cast(substring(gps_location, position(',' in gps_location) + 1) as float) as x,
+		cast(substring(gps_location, 0, position(',' in gps_location)) as float) as y,
+		-- Note the sequence:
+		-- 1 Create a point using lat/long as float in 4326 coordinate system
+		-- 2 reproject the 4326 points to 2272 points using ST_Transform
+		--   simply setting the srid doesn't do this
+		st_transform(
+			st_point(
+				cast(substring(gps_location, position(',' in gps_location) + 1) as float),
+				cast(substring(gps_location, 0, position(',' in gps_location)) as float),
+				4326),
+			2272) as geo_id
+	from sdp.school
+	where gps_location is not null
+	and (year_closed = 'open' or year_closed is null);
+	
+
+
 -- build view to restrict us to district schools
 
 drop table if exists sdp.district_school;
 
 create table sdp.district_school as
+	with catchment as (
+		select
+			catchment_year,
+			es_id,
+			st_area(wkb_geometry) * 0.00002295686400367 as area_acre -- acres
+		from sdp.catchments_all_years
+	)
 	select
 		school_year,
 		cast(substring(school_year, 1, 4) as integer) as start_year,
 		ulcs_code,
-		school_region
+		publication_name as school_name,
+		school_region,
+		area_acre
 	from sdp.school
+	left join
+		catchment
+		on
+			catchment_year = cast(substring(school_year, 1, 4) as integer)
+		and
+			es_id = cast(ulcs_code as character varying)
 	where school_year in ('2016-2017', '2017-2018', '2018-2019', '2019-2020')
 	and upper(admission_type) = 'NEIGHBORHOOD'
 	and upper(governance) = 'DISTRICT'
 	and current_grade_span_served like '%00%'
 	and (year_closed = 'open' or year_closed is null);
+
+
+-- Compute tenure of the principal
+drop table if exists sdp.school_tenure;
+
+create table sdp.school_tenure as
+	with leader as (
+		select
+			school_year,
+			ulcs_code,
+			publication_name,
+			lower(replace(replace(replace(replace(school_leader_name, 'Ms. ', ''), 'Mr. ', ''), 'Mrs. ', ''), 'Dr. ', '')) as school_leader_name
+		from sdp.school
+		where (year_closed = 'open' or year_closed is null)
+	),
+	leader_logic as (
+		select
+			school_year,
+			ulcs_code,
+			publication_name,
+			school_leader_name,
+			lag(school_leader_name, 1, null) over (partition by ulcs_code order by school_year asc) as school_leader_name_prev,
+			case
+				when school_leader_name = lag(school_leader_name, 1, null) over (partition by ulcs_code order by school_year asc) then 1
+				else 0
+			end as school_leader_name_equal
+		from
+			leader
+	)
+	select
+		school_year,
+		cast(substring(school_year, 1, 4) as int) as catchment_year,
+		cast(ulcs_code as character varying) as es_id,
+		publication_name,
+		school_leader_name,
+	-- 	lag(school_leader_name, 1, null) over (partition by ulcs_code order by school_year asc) as school_leader_name_prev,
+	-- 	case
+	-- 		when school_leader_name = lag(school_leader_name, 1, null) over (partition by ulcs_code order by school_year asc) then 1
+	-- 		else 0
+	-- 	end as school_leader_name_equal,
+		sum(school_leader_name_equal) over (
+			partition by ulcs_code, school_leader_name
+			order by school_year asc
+		) + 1 as cumulative_tenure
+	from
+		leader_logic;
 
 
 -- union all the elementary catchments by year
@@ -313,7 +406,7 @@ inner join
 drop table if exists public.demog_by_catchment;
 
 create table public.demog_by_catchment as
-	
+
 with demog as (
 		select
 			2010 as "year",
@@ -352,7 +445,7 @@ with demog as (
 			overlap.overlap_ratio
 		from
 			public.block_group_overlap overlap
-		inner join
+		inner join --select * from
 		 	sdp.district_school
 		 	on
 		 		cast(district_school.ulcs_code as text) = overlap.es_id
@@ -374,16 +467,24 @@ with demog as (
 		sum(total_weighted) as total,
 		sum(white_weighted) / sum(total_weighted) as pct_white,
 		sum(black_weighted) / sum(total_weighted) as pct_black,
-		sum(asian_weighted) / sum(total_weighted) as pct_asian
+		sum(asian_weighted) / sum(total_weighted) as pct_asian,
+		district_school.area_acre,
+		sum(total_weighted) / district_school.area_acre as population_density
 	from
 		overlap
+	inner join
+		sdp.district_school
+		on
+			cast(district_school.ulcs_code as text) = overlap.es_id
+		and
+			district_school.start_year = overlap.catchment_year
 	group by
 		census_year,
 		catchment_year,
 	 	data_year,
 		es_id,
-		es_short
-	order by es_id, data_year;
+		es_short,
+		district_school.area_acre;
 
 
 -- Compute average income 
@@ -437,7 +538,10 @@ create table census.income_by_catchment as
 			catchment_year,
 			es_id,
 			es_short,
-			sum(households_in_catchment) as total_catchment_households
+			sum(households_in_catchment) as total_catchment_households,
+			-- only count income of tracts that are at least 10% in the catchment
+			min(case when overlap_ratio > .10 and cast(income as int) > 0 then cast(income as int) else null end) as min_income,
+			max(case when overlap_ratio > .10 then cast(income as int) else null end) as max_income
 		from
 			overlap
 		group by
@@ -455,7 +559,12 @@ create table census.income_by_catchment as
 			overlap.total_households as total_households_in_tract,
 			catchment_rollup.total_catchment_households,
 			overlap.households_in_catchment,
-			cast(overlap.income as double precision) as income
+			case
+				when cast(overlap.income as double precision) > 0 then cast(overlap.income as double precision)
+				else null
+			end as income,
+			min_income,
+			max_income
 		from
 			catchment_rollup
 		inner join
@@ -474,14 +583,17 @@ create table census.income_by_catchment as
 		es_short,
 		--sum(households_in_catchment / total_catchment_households) as sum_ratio,
 		--sum(income * households_in_catchment / total_catchment_households) as median_household_income,
-		cast(sum(income * households_in_catchment / total_catchment_households) as int) as median_household_income
+		cast(sum(income * households_in_catchment / total_catchment_households) as int) as median_household_income,
+		max_income - min_income as median_household_income_diff
 	from
 		overlap_rollup
 	group by
 		acs_year,
 		catchment_year,
 		es_id,
-		es_short;
+		es_short,
+		min_income,
+		max_income;
 
 
 -- Compute income deltas within districts between years
@@ -576,6 +688,7 @@ create table sdp.charter_catchment as
 		using(catchment_year, es_id);
 	
 
+-- find intersection of kindergarten charter school locations and sdp kindergartens
 
 drop table if exists sdp.charter_catchment_overlap;
 
@@ -609,6 +722,38 @@ create table sdp.charter_catchment_overlap as
 			charters
 			using(catchment_year, es_id)
 	),
+	charter_point as (
+		select
+			start_year as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			geo_id
+		from 
+			sdp.school_location
+		where
+			gps_location is not null
+		and
+			governance = 'charter'
+		and
+			current_grade_span_served like '%00%'
+		
+		union all
+		
+		-- quick assumption that no schools have moved. Need to clean this up
+		select
+			2016 as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			geo_id
+		from 
+			sdp.school_location
+		where
+			gps_location is not null
+		and
+			governance = 'charter'
+		and
+			current_grade_span_served like '%00%'
+		and
+			start_year = 2017
+	),
 	district_geom as (
 		select 
 			catch.catchment_year,
@@ -637,18 +782,124 @@ create table sdp.charter_catchment_overlap as
 			else 0
 		end as adjacent,
 		case
-			when st_area(st_intersection(district.wkb_geometry, charter.wkb_geometry)) > 100 then 1
+			when charter_point.es_id is not null then 1
 			else 0
-		end as exact,
+		end as inside,
 		district.wkb_geometry
 	from
 		district_geom as district
 	left join
+		charter_point
+		on
+			district.catchment_year = charter_point.catchment_year
+		and
+			st_intersects(district.wkb_geometry, charter_point.geo_id)
+	left join
 		charter_geom as charter
 		on
-			district.catchment_year = district.catchment_year
+			district.catchment_year = charter.catchment_year
 		and
 			st_intersects(district.wkb_geometry, charter.wkb_geometry);
+
+
+-- distance to nearest charter school
+
+drop table if exists sdp.school_charter_distance;
+
+create table sdp.school_charter_distance as
+	with charters as(
+		select
+			school_year,
+			cast(substring(school_year, 1, 4) as int) as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			current_grade_span_served,
+			lower(governance) as school_region
+		from
+			sdp.school
+		where
+			lower(governance) = 'charter'
+		and
+			current_grade_span_served like '%00%'
+		and
+			year_closed = 'open'
+	),
+	charter_point as (
+		select
+			start_year as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			geo_id
+		from 
+			sdp.school_location
+		where
+			gps_location is not null
+		and
+			governance = 'charter'
+		and
+			current_grade_span_served like '%00%'
+		
+		union all
+		
+		-- quick assumption that no schools have moved
+		select
+			2016 as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			geo_id
+		from 
+			sdp.school_location
+		where
+			gps_location is not null
+		and
+			governance = 'charter'
+		and
+			current_grade_span_served like '%00%'
+		and
+			start_year = 2017
+	),
+	district_point as (
+		select
+			start_year as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			geo_id
+		from
+			sdp.school_location
+		where
+			gps_location is not null
+		and
+			governance = 'district'
+		and
+			current_grade_span_served like '%00%'
+		
+		union all
+		
+		-- quick assumption no schools have moved
+		
+		select
+			2016 as catchment_year,
+			cast(ulcs_code as character varying) as es_id,
+			geo_id
+		from
+			sdp.school_location
+		where
+			gps_location is not null
+		and
+			governance = 'district'
+		and
+			current_grade_span_served like '%00%'
+		and
+			start_year = 2017
+	)
+	select
+		catchment_year,
+		district_point.es_id,
+		min(abs(st_length(st_makeline(district_point.geo_id, charter_point.geo_id)))) as charter_distance
+	from
+		district_point
+	left join
+		charter_point
+		using(catchment_year)
+	group by
+		catchment_year,
+		district_point.es_id;
 
 
 -- build a table to bring together all the variables I want to explore
@@ -660,7 +911,8 @@ create table public.comparison as
 		select
 			catchment_year,
 			es_id,
-			case when sum(adjacent) > 0 then 1 else 0 end as adjacent
+			case when sum(adjacent) > 0 then 1 else 0 end as adjacent,
+			case when sum(inside) > 0 then 1 else 0 end as inside
 		from
 			sdp.charter_catchment_overlap
 		group by
@@ -669,7 +921,7 @@ create table public.comparison as
 	),
 	grade_3 as (
 		select
-			cast(school_year as int) - 1 as catchment_year,
+			cast(school_year as int) as catchment_year,
 			rpad(cast(school_code as text), 4, '0') as es_id,
 			school_name,
 			grade,
@@ -677,6 +929,7 @@ create table public.comparison as
 		from sdp.score 
 		where grade = '3'
 		and subject = 'ELA'
+		and ("group" = 'All Students' or "group" is null)
 		group by
 			school_year,
 			school_code,
@@ -699,7 +952,12 @@ create table public.comparison as
 		birth.total_births,
 		birth.total_enrolled,
 		ratio_d.enrolled_delta,
-		ratio_d.births_delta
+		ratio_d.births_delta,
+		charter.inside as contains_charter,
+		income.median_household_income_diff,
+		demog.population_density,
+		school_tenure.cumulative_tenure,
+		school_charter_distance.charter_distance
 	from
 		public.births_to_enrollment birth
 	inner join
@@ -713,6 +971,12 @@ create table public.comparison as
 			using(catchment_year, es_id)
 	left join
 		grade_3
+			using(catchment_year, es_id)
+	left join
+		sdp.school_tenure
+			using(catchment_year, es_id)
+	left join
+		sdp.school_charter_distance
 			using(catchment_year, es_id)
 	inner join
 		sdp.district_school school
