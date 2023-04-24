@@ -1,11 +1,11 @@
 # kindergarten_forecast
 
-View a [preview of the notebook](https://htmlpreview.github.io/?https://github.com/SamSang/kindergarten_forecast/blob/main/FinalReport.html)!
+View a [preview of the R Markdown](https://htmlpreview.github.io/?https://github.com/SamSang/kindergarten_forecast/blob/main/Final_Project.html)!
 
 This is (meant to be) a graduate-level introductory statistics final project.
 
 The initial idea was to use census data to predict kindergarten enrollment in School District of Philadelphia neighborhood schools.
-The more valuable part of this project will probably the data pipeline.
+The the data pipeline will probably be the more valuable part of this project.
 
 ## What do I do first?
 
@@ -24,7 +24,7 @@ The more valuable part of this project will probably the data pipeline.
 |-|-|-|
 |`load_data.py`|1|Downloads and loads data to the database|
 |`transforms.sql`|2|Transforms the tables in the databse|
-|`FinalReport.Rmd`|3|R Markdown of analysis|
-|`FinalReport.html`|4|Knit result of `FinalReport.Rmd`
+|`Final_Project.Rmd`|3|R Markdown of analysis|
+|`Final_Project.md`|4|Knit result of `Final_Project.Rmd`
 
 Good luck!
