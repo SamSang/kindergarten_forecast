@@ -59,6 +59,107 @@ def load_births_file(births_file, births_path, engine, schema):
         if_exists='replace',
     )
 
+def district_enrollment_csv(download_path, year, engine, schema):
+    """
+    Load district enrollment in csv format
+    Works for school year 2019-2020 and going forward
+    """
+    url_template = "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/Enrollment_Demographics_School/{year}%20Enrollment%20&%20Demographics.csv"
+
+    url = url_template.format(year=year)
+    download_file = f'{year}_Enrollment_Demographics.csv'
+    download_file_path = os.path.join(download_path, download_file)
+    urllib.request.urlretrieve(url, download_file_path)
+    table_name = clean_col(f'schools_demog_{year}')
+    df = pandas.read_csv(
+        download_file_path,
+        sep=',',
+        )
+    df.rename(columns=clean_col, inplace=True)
+    df.to_sql(
+        name=table_name,
+        con=engine,
+        schema=schema,
+        if_exists='replace',
+    )
+
+def district_enrollment_xlsx(download_path, year, engine, schema):
+    """
+    Load district enrollment in intermediary xlsx format
+    Works for school year 2018-2019 only
+    """
+    url_template = 'https://cdn.philasd.org/offices/performance/Open_Data/School_Information/Enrollment_Demographics_School/{year}%20Enrollment%20&%20Demographics.xlsx'
+    
+    url = url_template.format(year=year)
+    download_file = f'{year}_Enrollment_Demographics.xlsx'
+    download_file_path = os.path.join(download_path, download_file)
+    urllib.request.urlretrieve(url, download_file_path)
+
+    workbook = openpyxl.load_workbook(download_file_path)
+    worksheet = workbook['Sheet1']
+    data = worksheet.values
+    cols = next(data)[0:]
+    data = list(data)
+    df = pandas.DataFrame(data, columns=cols)
+
+    table_name = clean_col(f'schools_demog_{year}')
+    df.rename(columns=clean_col, inplace=True)
+    df.to_sql(
+        name=table_name,
+        con=engine,
+        schema=schema,
+        if_exists='replace',
+    )
+
+def district_enrollment_xlsx_legacy(download_path, year, engine, schema):
+    """
+    Load district enrollment in legacy xlsx format
+    Works for school year 2017-2018 and before
+    """
+    url_template = 'https://cdn.philasd.org/offices/performance/Open_Data/School_Information/Enrollment_Demographics_School/{year}%20Enrollment%20&%20Demographics.xlsx'
+
+    url = url_template.format(year=year)
+    download_file = f'{year}_Enrollment_Demographics.xlsx'
+    download_file_path = os.path.join(download_path, download_file)
+    urllib.request.urlretrieve(url, download_file_path)
+
+    workbook = openpyxl.load_workbook(download_file_path)
+
+    # process sheet(s) we need
+
+    # Ethnicity
+    ethnicity = workbook['Ethnicity'].values
+    # skip 4 lines
+    for i in range(4):
+        next(ethnicity)
+    subtabs = next(ethnicity)[1:21]
+    ethnicity_cols = list(next(ethnicity)[1:21])
+    # match subtabs to columns to build something like "Hispanic_percent"
+    for label_idx, label in enumerate(subtabs):
+        if label:
+            for col_idx in range(len(ethnicity_cols)):
+                if (col_idx - 1) // 2 == (label_idx) // 2:
+                    ethnicity_cols[col_idx] = label.split('\n')[0] + '_' + ethnicity_cols[col_idx]
+    ethnicity = [r[1:21] for r in list(ethnicity)]
+
+    df_ethnicity = pandas.DataFrame(ethnicity, columns=ethnicity_cols)
+    df_ethnicity.rename(columns=clean_col, inplace=True)
+    # if we merge to another sheet, remove duplicate columns to avoid muddled names
+    #df_ethnicity = df_ethnicity.drop(columns=['total_enrolled', 'learning_network', 'school_name'])
+
+    # merge both dataframes together so we only load one table
+    #df = pandas.merge(something, df_ethnicity, how='left', on=['school_id', 'grade'])
+    df = df_ethnicity
+    df .insert(0, 'school_year', year)
+
+    table_name = clean_col(f'schools_demog_{year}')
+    df.to_sql(
+        name=table_name,
+        con=engine,
+        schema='sdp',
+        if_exists='replace',
+    )
+
 def main():
     user = input('user: ')
     #pw = input('password: ')
@@ -77,109 +178,26 @@ def main():
     print("Loading school district demographics files...")
     # All demog data will live in one directory
     demog_data_path = os.path.join('..', 'data', 'schools', 'demog')
-    
-    # load student demog data in csv format
-    demog_csv_url = "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/Enrollment_Demographics_School/{year}%20Enrollment%20&%20Demographics.csv"
 
-    demog_years_csv = [
+    demog_years = [
         '2019-2020',
-    ]
-
-    for year in tqdm(demog_years_csv):
-        url = demog_csv_url.format(year=year)
-        download_file = f'{year}_Enrollment_Demographics.csv'
-        download_path = os.path.join(demog_data_path, download_file)
-        urllib.request.urlretrieve(url, download_path)
-        table_name = clean_col(f'schools_demog_{year}')
-        df = pandas.read_csv(
-            download_path,
-            sep=',',
-            )
-        df.rename(columns=clean_col, inplace=True)
-        df.to_sql(
-            name=table_name,
-            con=engine,
-            schema='sdp',
-            if_exists='replace',
-        )
-
-    # load student demog data from xlsx format
-    demog_xlsx_url = 'https://cdn.philasd.org/offices/performance/Open_Data/School_Information/Enrollment_Demographics_School/{year}%20Enrollment%20&%20Demographics.xlsx'
-
-    # load data in clean format first
-    demog_years_xlsx = [
         '2018-2019',
-    ]
-
-    for year in tqdm(demog_years_xlsx):
-        url = demog_xlsx_url.format(year=year)
-        download_file = f'{year}_Enrollment_Demographics.xlsx'
-        download_path = os.path.join(demog_data_path, download_file)
-        urllib.request.urlretrieve(url, download_path)
-
-        workbook = openpyxl.load_workbook(download_path)
-        worksheet = workbook['Sheet1']
-        data = worksheet.values
-        cols = next(data)[0:]
-        data = list(data)
-        df = pandas.DataFrame(data, columns=cols)
-
-        table_name = clean_col(f'schools_demog_{year}')
-        df.rename(columns=clean_col, inplace=True)
-        df.to_sql(
-            name=table_name,
-            con=engine,
-            schema='sdp',
-            if_exists='replace',
-        )
-
-    demog_years_xlsx = [
         '2017-2018',
         '2016-2017',
     ]
 
-    for year in tqdm(demog_years_xlsx):
-        url = demog_xlsx_url.format(year=year)
-        download_file = f'{year}_Enrollment_Demographics.xlsx'
-        download_path = os.path.join(demog_data_path, download_file)
-        urllib.request.urlretrieve(url, download_path)
+    for year in tqdm(demog_years):
+        # TODO use the national education data api to get this data.
+        if year >= '2019-2020':
+            district_enrollment = district_enrollment_csv
+        elif year == '2018-2019':
+            district_enrollment = district_enrollment_xlsx
+        elif year <= '2017-2018':
+            district_enrollment = district_enrollment_xlsx_legacy
+        else:
+            print(f"Demographics in year {year} is not supported.")
 
-        workbook = openpyxl.load_workbook(download_path)
-
-        # process sheet(s) we need
-
-        # Ethnicity
-        ethnicity = workbook['Ethnicity'].values
-        # skip 4 lines
-        for i in range(4):
-            next(ethnicity)
-        subtabs = next(ethnicity)[1:21]
-        ethnicity_cols = list(next(ethnicity)[1:21])
-        # match subtabs to columns to build something like "Hispanic_percent"
-        for label_idx, label in enumerate(subtabs):
-            if label:
-                for col_idx in range(len(ethnicity_cols)):
-                    if (col_idx - 1) // 2 == (label_idx) // 2:
-                        ethnicity_cols[col_idx] = label.split('\n')[0] + '_' + ethnicity_cols[col_idx]
-        ethnicity = [r[1:21] for r in list(ethnicity)]
-
-        df_ethnicity = pandas.DataFrame(ethnicity, columns=ethnicity_cols)
-        df_ethnicity.rename(columns=clean_col, inplace=True)
-        # if we merge to another sheet, remove duplicate columns to avoid muddled names
-        #df_ethnicity = df_ethnicity.drop(columns=['total_enrolled', 'learning_network', 'school_name'])
-
-        # merge both dataframes together so we only load one table
-        #df = pandas.merge(something, df_ethnicity, how='left', on=['school_id', 'grade'])
-        df = df_ethnicity
-        df .insert(0, 'school_year', year)
-
-        table_name = clean_col(f'schools_demog_{year}')
-        df.to_sql(
-            name=table_name,
-            con=engine,
-            schema='sdp',
-            if_exists='replace',
-        )
+        district_enrollment(demog_data_path, year, engine, sdp_schema)
 
     print("Processing SDP list of schools...")
     list_data_path = os.path.join('..', 'data', 'schools', 'list')
