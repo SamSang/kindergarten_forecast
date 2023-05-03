@@ -1,5 +1,7 @@
 notes/
 scripts/*.zip
+scripts/test.py
+scripts/__pycache__
 data/schools/demog/*
 data/schools/list/*
 data/schools/SDP_Catchment_All_Years
