@@ -44,6 +44,21 @@ def clean_col(col: str):
     col = col.replace(' ', '_')
     return col
 
+def load_births_file(births_file, births_path, engine, schema):
+    """Load one births file to database"""
+    year = births_file[0:4]
+    df = pandas.read_csv(os.path.join(births_path, births_file))
+    df.insert(0, 'census_year', year)
+    df.rename(columns=clean_col, inplace=True)
+
+    table_name = f'births_{year}'
+    df.to_sql(
+        name=table_name,
+        con=engine,
+        schema=schema,
+        if_exists='replace',
+    )
+
 def main():
     user = input('user: ')
     #pw = input('password: ')
@@ -55,19 +70,9 @@ def main():
     print("Loading births files...")
     births_path = os.path.join('..',"data", "births")
     births_files = get_csvs(births_path)
-    for births_file in tqdm(births_files):
-        year = births_file[0:4]
-        df = pandas.read_csv(os.path.join(births_path, births_file))
-        df.insert(0, 'census_year', year)
-        df.rename(columns=clean_col, inplace=True)
 
-        table_name = f'births_{year}'
-        df.to_sql(
-            name=table_name,
-            con=engine,
-            schema='census',
-            if_exists='replace',
-        )
+    for births_file in tqdm(births_files):
+        load_births_file(births_file, births_path, engine, census_schema)
 
     print("Loading school district demographics files...")
     # All demog data will live in one directory
