@@ -275,7 +275,6 @@ def main():
 
     print("Processing SDP list of schools...")
     list_data_path = os.path.join('..', 'data', 'schools', 'list')
-    list_table_name = clean_col(f'school')
 
     school_list_configs = [
         {
