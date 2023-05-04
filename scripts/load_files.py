@@ -156,7 +156,7 @@ def district_enrollment_xlsx_legacy(download_path, year, engine, schema):
     df.to_sql(
         name=table_name,
         con=engine,
-        schema='sdp',
+        schema=schema,
         if_exists='replace',
     )
 
@@ -234,6 +234,121 @@ def school_list(list_data_path, engine, mode, schema, year, url, sheet):
         if_exists=if_exists,
     )
 
+def download_unzip(url: str, download_path) -> str:
+    """
+    Download and unzip a file
+    return the full path to the unzipped contents
+    """
+    download_file = os.path.basename(url)
+    download_file_path = os.path.join(download_path, download_file)
+    urllib.request.urlretrieve(url, download_file_path)
+
+    # unzip the file
+    unzip_dir = os.path.basename(download_file_path).rstrip('.zip')
+    unzip_path = os.path.join(download_path, unzip_dir)
+    with zipfile.ZipFile(download_file_path, 'r') as f:
+        f.extractall(unzip_path)
+
+    return unzip_path
+
+def unzip_score_file(year, file_paths, destination_dir) -> str:
+    """
+    Validate the score file exists for the given year.
+    If the score file exists, return the path to that file.
+    """
+    # filter scores to just this year's files
+    zip_files = list(filter(lambda p: p != p.rstrip(".zip"), file_paths))
+    score_files = list(filter(lambda p: p[0:4] == year, zip_files))
+
+    # confirm a single result
+    if len(score_files) == 0:
+        print(f"No score file found for year {year}")
+    elif len(score_files) > 1:
+        print(f"More than one score file found for year {year}")
+    
+    score_file = score_files[0]
+
+    # unzip the file
+    unzip_dir = os.path.basename(score_file).rstrip('.zip')
+    unzip_path = os.path.join(destination_dir, unzip_dir)
+    score_file_path = os.path.join(destination_dir, score_file)
+    with zipfile.ZipFile(score_file_path, 'r') as f:
+        f.extractall(unzip_path)
+
+    # build the path to the file we need to process
+    scores_year = os.path.basename(score_file)[5:9]
+    scores_file = f"{scores_year} PSSA Keystone Actual (School_S).xlsx"
+    scores_file_path = os.path.join(unzip_path, scores_file)
+    
+    return scores_file_path
+
+def scores(file_path, engine, mode, schema, year):
+    """
+    If the given year's file is available to load, load
+    """
+    scores_year = os.path.basename(file_path)[0:4]
+    workbook = openpyxl.load_workbook(file_path)
+    if scores_year <= '2017':
+        sheet_name = "All Students"
+        sheet = workbook[sheet_name].values
+        # L6 has our secondary headers
+        for i in range(5):
+            next(sheet)
+        scores_subtabs = next(sheet)[1:19]
+        # L7 has our primary headers
+        # col 1 is blank, data ends at S=19
+        scores_cols = list(next(sheet)[1:19])
+        # match subtabs to columns to build something like "Hispanic_percent"
+        for label_idx, label in enumerate(scores_subtabs):
+            if label:
+                for col_idx in range(len(scores_cols)):
+                    if (col_idx) // 2 == (label_idx) // 2:
+                        scores_cols[col_idx] = label.split('\n')[0] + '_' + scores_cols[col_idx]
+        sheet = [row[1:19] for row in list(sheet)]
+
+        df = pandas.DataFrame(sheet, columns=scores_cols)
+        df.rename(columns=clean_col, inplace=True)
+
+    elif scores_year >= '2018':
+        sheet_name = "Sheet1"
+        sheet = workbook[sheet_name].values
+        scores_cols = list(next(sheet)[0:19])
+        sheet = [row[0:19] for row in list(sheet)]
+
+        df = pandas.DataFrame(sheet, columns=scores_cols)
+        df.rename(columns=clean_col, inplace=True)
+
+        scores_field_map = {
+            "src_school_id": "school_code",
+            "school_id": "school_code",
+            #"category": "group",
+            "count_below_basic": "level_1_count",
+            "percent_below_basic": "level_1_percent",
+            "count_basic": "level_2_count",
+            "percent_basic": "level_2_percent",
+            "count_proficient": "level_3_count",
+            "percent_proficient": "level_3_percent",
+            "count_advanced": "level_4_count",
+            "percent_advanced": "level_4_percent",
+            "count_prof_adv": "levels_3_and_4_count",
+            "percent_prof_adv": "levels_3_and_4_percent",
+        }
+
+        df.rename(columns=scores_field_map, inplace=True)
+
+    # apply to datafram from either origin
+    df.insert(0, 'school_year', scores_year)
+
+    if_exists = 'append'
+    if mode == 1:
+        if_exists = 'replace'
+    df.to_sql(
+        name="score",
+        con=engine,
+        schema=schema,
+        if_exists=if_exists,
+    )
+
 def main():
     user = input('user: ')
     #pw = input('password: ')
@@ -305,95 +420,27 @@ def main():
 
     # download the zip file of all years
     scores_url = "https://cdn.philasd.org/offices/performance/Open_Data/School_Performance/PSSA_Keystone/PSSA_Keystone_All_Years.zip"
+    scores_path = os.path.join('..', 'data', 'schools')
 
-    sdp_data_path = os.path.join('..', 'data', 'schools')
-    scores_table_name = clean_col(f'score')
-
-    scores_all_download_file = os.path.basename(scores_url)
-    list_historical_download_path = os.path.join(sdp_data_path, scores_all_download_file)
-    urllib.request.urlretrieve(scores_url, scores_all_download_file)
-
-    # unzip the file with all years of scores
-    scores_unzip_dir = os.path.basename(scores_url).rstrip('.zip')
-    scores_unzip_path = os.path.join(sdp_data_path, scores_unzip_dir)
-    with zipfile.ZipFile(scores_all_download_file, 'r') as f:
-        f.extractall(scores_unzip_path)
+    scores_unzip_path = download_unzip(scores_url, scores_path)
 
     # build our list of files to process
     scores_all_files = os.listdir(scores_unzip_path)
     scores_zip_files = list(filter(lambda p: p != p.rstrip(".zip"), scores_all_files))
 
-    index = 0
-    for scores_zip_file in tqdm(scores_zip_files):
-        if scores_zip_file[0:4] in ['2015', '2016', '2017', '2018']:
-        #if scores_zip_file[0:4] in ['2016', '2017', '2018', '2019']:
-            # 2017-2018 and 2018-2019 data is a different format. I'm so done.
-            # 2019 doesn't exist even. I think I'm going to just use the 2016-2017 data here.
-            index += 1
-            scores_zip_file_path = os.path.join(scores_unzip_path, scores_zip_file)
-            score_file_unzip_dir = os.path.basename(scores_zip_file).rstrip('.zip')
-            score_file_unzip_path = os.path.join(scores_unzip_path, score_file_unzip_dir)
-            with zipfile.ZipFile(scores_zip_file_path, 'r') as f:
-                f.extractall(score_file_unzip_path)
-            scores_year = scores_zip_file[5:9]
-            # 2017 PSSA Keystone Actual (School_S).xlsx
-            scores_file = f"{scores_year} PSSA Keystone Actual (School_S).xlsx"
-            scores_file_path = os.path.join(score_file_unzip_path, scores_file)
-            workbook = openpyxl.load_workbook(scores_file_path)
-            if int(scores_year) <= 2017:
-                all_students = workbook["All Students"].values
-                # L6 has our secondary headers
-                for i in range(5):
-                    next(all_students)
-                scores_subtabs = next(all_students)[1:19]
-                # L7 has our primary headers
-                # col 1 is blank, data ends at S=19
-                scores_cols = list(next(all_students)[1:19])
-                # match subtabs to columns to build something like "Hispanic_percent"
-                for label_idx, label in enumerate(scores_subtabs):
-                    if label:
-                        for col_idx in range(len(scores_cols)):
-                            if (col_idx) // 2 == (label_idx) // 2:
-                                scores_cols[col_idx] = label.split('\n')[0] + '_' + scores_cols[col_idx]
-                all_students = [r[1:19] for r in list(all_students)]
+    # the sequence seems to matter here
+    score_years = [
+        '2017',
+        '2018',
+        '2016',
+        '2015',
+    ]
 
-                df_all_students = pandas.DataFrame(all_students, columns=scores_cols)
-                df_all_students.rename(columns=clean_col, inplace=True)
-            if int(scores_year) > 2017:
-                all_students = workbook["Sheet1"].values
-                scores_cols = list(next(all_students)[0:19])
-                all_students = [r[0:19] for r in list(all_students)]
-                scores_field_map = {
-                    "src_school_id": "school_code",
-                    "school_id": "school_code",
-                    "count_below_basic": "level_1_count",
-                    "percent_below_basic": "level_1_percent",
-                    "count_basic": "level_2_count",
-                    "percent_basic": "level_2_percent",
-                    "count_proficient": "level_3_count",
-                    "percent_proficient": "level_3_percent",
-                    "count_advanced": "level_4_count",
-                    "percent_advanced": "level_4_percent",
-                    "count_prof_adv": "levels_3_and_4_count",
-                    "percent_prof_adv": "levels_3_and_4_percent",
-                }
-
-                df_all_students = pandas.DataFrame(all_students, columns=scores_cols)
-                df_all_students.rename(columns=clean_col, inplace=True)
-
-                df_all_students.rename(columns=scores_field_map, inplace=True)
-
-            df_all_students.insert(0, 'school_year', scores_year)
-
-            mode = 'append'
-            if index == 1:
-                mode = 'replace'
-            df_all_students.to_sql(
-                name=scores_table_name,
-                con=engine,
-                schema='sdp',
-                if_exists=mode,
-            )
+    for index, year in tqdm(enumerate(score_years)):
+        # get the path to an unzipped file
+        score_file_path = unzip_score_file(year, scores_zip_files, scores_unzip_path)
+        # load that unzipped file
+        scores(score_file_path, engine, index, sdp_schema, year)
 
     print("Process block group data...")
     """
