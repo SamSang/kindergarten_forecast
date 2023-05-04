@@ -160,6 +160,80 @@ def district_enrollment_xlsx_legacy(download_path, year, engine, schema):
         if_exists='replace',
     )
 
+def school_list(list_data_path, engine, mode, schema, year, url, sheet):
+    """
+    Load school-level data
+    :param mode: 1 = replace table; != 1 = append table
+                 First file drops and recreates table.
+                 Subsequent files append to the new table.
+    """
+    download_file = os.path.basename(url).replace("%20", "_")
+    download_file_path = os.path.join(list_data_path, download_file)
+    urllib.request.urlretrieve(url, download_file_path)
+
+    # treat xlsx and csv files differently
+
+    if re.search(r"\.csv$", download_file_path):
+        df = pandas.read_csv(download_file_path)
+        df.insert(0, "school_year", year)
+        df.rename(columns=clean_col, inplace=True)
+
+    elif re.search(r"\.xlsx$", download_file_path):
+
+        workbook = openpyxl.load_workbook(download_file_path)
+        active_sheet = workbook[sheet].values
+
+        start_column = 0 # begin, index starts at zero
+        n_columns = 57   # continue for n columns
+
+        cols = list(next(active_sheet)[start_column:n_columns])
+        data = [r[start_column:n_columns] for r in list(active_sheet)]
+
+        df = pandas.DataFrame(data, columns=cols)
+
+        df.rename(columns=clean_col, inplace=True)
+        convert_cols = {
+            "grade_span": "current_grade_span_served",
+        }
+        df.rename(columns=convert_cols, inplace=True)
+
+    # at this point, we have a dataframe we can treat the same way regardless of the file
+
+    keep_cols = [
+        "school_year",
+        "pa_code",
+        "ulcs_code",
+        "publication_name",
+        "admission_type",
+        "current_grade_span_served",
+        "school_level",
+        "governance",
+        "school_region_code",
+        "school_region",
+        "year_closed",
+        "gps_location",
+        "school_leader_name",
+    ]
+
+    df = df.filter(keep_cols, axis=1)
+    df["gps_location"] = df.get("gps_location", None)
+
+    if year != "multi":
+        # make the school_year column equal the value we passed in
+        df["school_year"] = pandas.Series([year for x in range(len(df.index))])
+
+    if_exists = "append"
+    if mode == 0:
+        if_exists = "replace"
+
+    table_name = clean_col(f'school')
+    df.to_sql(
+        name=table_name,
+        con=engine,
+        schema=schema,
+        if_exists=if_exists,
+    )
+
 def main():
     user = input('user: ')
     #pw = input('password: ')
@@ -203,105 +277,30 @@ def main():
     list_data_path = os.path.join('..', 'data', 'schools', 'list')
     list_table_name = clean_col(f'school')
 
-    print("Processing xlsx format files")
-    list_urls = [
-        ("https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/Longitudinal%20School%20List%20(20171128).xlsx", "Sheet1", "multi"),
-        ("https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/2017-2018%20Master%20School%20List%20(20180611).xlsx", "Master School List", "2017-2018"),
+    school_list_configs = [
+        {
+            "year": "multi",
+            "url": "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/Longitudinal%20School%20List%20(20171128).xlsx",
+            "sheet": "Sheet1",
+        },
+        {
+            "year": "2017-2018",
+            "url": "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/2017-2018%20Master%20School%20List%20(20180611).xlsx",
+            "sheet": "Master School List",
+        },
+        {
+            "year": "2018-2019",
+            "url": "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/2018-2019%20Master%20School%20List%20(20190510).csv",
+            "sheet": None,
+        },
+        {
+            "year": "2019-2020",
+            "url": "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/2019-2020%20Master%20School%20List%20(20201123).csv",
+            "sheet": None,
+        },
     ]
-    for index, list_tuple in tqdm(enumerate(list_urls)):
-        list_url, list_sheet, list_year = list_tuple
-        list_historical_download_file = os.path.basename(list_url).replace("%20", "_")
-        list_historical_download_path = os.path.join(list_data_path, list_historical_download_file)
-        urllib.request.urlretrieve(list_url, list_historical_download_path)
-
-        list_historical_workbook = openpyxl.load_workbook(list_historical_download_path)
-
-        list_historical = list_historical_workbook[list_sheet].values
-
-        list_historical_cols = list(next(list_historical)[0:57])
-
-        list_historical = [r[0:57] for r in list(list_historical)]
-
-        df_list_historical = pandas.DataFrame(list_historical, columns=list_historical_cols)
-        df_list_historical.rename(columns=clean_col, inplace=True)
-
-        list_convert_cols = {
-            "grade_span": "current_grade_span_served",
-        }
-        df_list_historical.rename(columns=list_convert_cols, inplace=True)
-
-        list_keep_cols = [
-            "school_year",
-            "pa_code",
-            "ulcs_code",
-            "publication_name",
-            "admission_type",
-            "current_grade_span_served",
-            "school_level",
-            "governance",
-            "school_region_code",
-            "school_region",
-            "year_closed",
-            "gps_location",
-            "school_leader_name",
-        ]
-        df_list_historical = df_list_historical.filter(list_keep_cols, axis=1)
-        df_list_historical["gps_location"] = df_list_historical.get("gps_location", None)
-
-        if list_year != "multi":
-            # make the school_year column equal the value we passed in
-            df_list_historical["school_year"] = pandas.Series([list_year for x in range(len(df_list_historical.index))])
-
-        list_mode = "append"
-        if index == 0:
-            list_mode = "replace"
-
-        df_list_historical.to_sql(
-            name=list_table_name,
-            con=engine,
-            schema='sdp',
-            if_exists=list_mode,
-        )
-
-    print("Processing csv format files")
-    # TODO clean up the repetitiveness of this section compared to the xlsx section
-    list_csv_files = [
-        "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/2018-2019%20Master%20School%20List%20(20190510).csv",
-        "https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_List/2019-2020%20Master%20School%20List%20(20201123).csv",
-    ]
-    for list_url in tqdm(list_csv_files):
-        list_historical_download_file = os.path.basename(list_url).replace("%20", "_")
-        year = list_historical_download_file[0:9]
-        list_historical_download_path = os.path.join(list_data_path, list_historical_download_file)
-        urllib.request.urlretrieve(list_url, list_historical_download_path)
-
-        df_list_historical = pandas.read_csv(list_historical_download_path)
-        df_list_historical.insert(0, 'school_year', year)
-        df_list_historical.rename(columns=clean_col, inplace=True)
-
-        list_keep_cols = [
-            "school_year",
-            "pa_code",
-            "ulcs_code",
-            "publication_name",
-            "admission_type",
-            "current_grade_span_served",
-            "school_level",
-            "governance",
-            "school_region_code",
-            "school_region",
-            "year_closed",
-            "gps_location",
-            "school_leader_name",
-        ]
-        df_list_historical = df_list_historical.filter(list_keep_cols, axis=1)
-
-        df_list_historical.to_sql(
-            name=list_table_name,
-            con=engine,
-            schema='sdp',
-            if_exists="append",
-        )
+    for index, school_list_config in tqdm(enumerate(school_list_configs)):
+        school_list(list_data_path, engine, index, sdp_schema, **school_list_config)
 
     print("Processing sdp scores...")
 
