@@ -417,6 +417,34 @@ def local_shapes(file_path, schema, db, user):
         check=True,
     )
 
+def remote_shapes(url, db, user, schema, sql=None, table=None):
+    """
+    Load shapefile from a remote
+    sql is optional
+    """
+    # TODO consider using the ogr python interface
+    # http://pcjericks.github.io/py-gdalogr-cookbook/vector_layers.html#create-a-postgis-table-from-wkt
+    
+    params = [
+        "ogr2ogr",
+        "-f", "PostgreSQL",
+        f"Pg:dbname={db} host=localhost port=5432 user={user}",
+        "-lco", f"SCHEMA={schema}",
+        "-lco", "OVERWRITE=YES",
+        "-nlt", "PROMOTE_TO_MULTI",
+        #"-sql", "",
+        "-t_srs", "EPSG:2272",
+        #"-nln", "",
+        url,
+    ]
+    if sql:
+        params.insert(10, "-sql")
+        params.insert(11, sql)
+    if table:
+        params.insert(12, "-nln")
+        params.insert(13, table)
+    subprocess.run(params, check=True)
+
 def main():
     user = input('user: ')
     #pw = input('password: ')
@@ -587,6 +615,9 @@ def main():
     for census_config in tqdm(census_configs):
         census(engine, census_schema, **census_config)
 
+    # end of loading data over the sqlalchemy connection
+    engine.dispose()
+
     print(f'Process sdp catchment shape files...') 
     catchment_years = [
         '1617',
@@ -606,45 +637,21 @@ def main():
         shape_file = unzip_shape_file(year, sdp_shape_files_path)
         local_shapes(file_path=shape_file, schema=sdp_schema, db=db, user=user)
 
-    print("Processing census tract shape files...")
-    # TODO consider using the ogr python interface
-    # http://pcjericks.github.io/py-gdalogr-cookbook/vector_layers.html#create-a-postgis-table-from-wkt
-    print("Processing 2010")
-    subprocess.run(
-        [
-            'ogr2ogr',
-            '-f', 'PostgreSQL',
-            f'Pg:dbname={db} host=localhost port=5432 user={user}',
-            '-lco', f'SCHEMA={census_schema}',
-            '-lco', 'OVERWRITE=YES',
-            '-nlt', 'PROMOTE_TO_MULTI',
-            '-sql', "select 2010 as year, tractce10 as tractce, geoid10 as geoid, name10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_tract10 where countyfp10 = '101'",
-            '-t_srs', 'EPSG:2272',
-            '-nln', 'tract',
-            '/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_42101_tract10.zip',
-        ],
-        check=True,
-    )
-
-    print("Processing census block group shape files...")
-    print("Processing 2010")
-    subprocess.run(
-        [
-            'ogr2ogr',
-            '-f', 'PostgreSQL',
-            f'Pg:dbname={db} host=localhost port=5432 user={user}',
-            '-lco', f'SCHEMA={census_schema}',
-            '-lco', 'OVERWRITE=YES',
-            '-nlt', 'PROMOTE_TO_MULTI',
-            '-sql', "select 2010 as year, tractce10 as tractce, blkgrpce10 as blkgrpce, geoid10 as geoid, namelsad10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_bg10 where countyfp10 = '101'",
-            '-t_srs', 'EPSG:2272',
-            '-nln', 'block_group',
-            '/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/BG/2010/tl_2010_42101_bg10.zip',
-        ],
-        check=True,
-    )
-
-    engine.dispose()
+    print("Processing census shape files...")
+    census_files = [
+        {
+            "url": "/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_42101_tract10.zip",
+            "sql": "select 2010 as year, tractce10 as tractce, geoid10 as geoid, name10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_tract10 where countyfp10 = '101'",
+            "table": "tract",
+        },
+        {
+            "url": "/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/BG/2010/tl_2010_42101_bg10.zip",
+            "sql": "select 2010 as year, tractce10 as tractce, blkgrpce10 as blkgrpce, geoid10 as geoid, namelsad10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_bg10 where countyfp10 = '101'",
+            "table": "block_group",
+        },
+    ]
+    for census_file in tqdm(census_files):
+        remote_shapes(db=db, user=user, schema=census_schema, **census_file)
 
 if __name__ == '__main__':
     main()
