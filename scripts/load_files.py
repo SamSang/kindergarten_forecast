@@ -349,6 +349,26 @@ def scores(file_path, engine, mode, schema, year):
         if_exists=if_exists,
     )
 
+def census(engine, schema: str, table: str, url: str, fields: list):
+    """
+    Load table using url, using fields
+    """
+
+    df = pandas.read_json(url.format(census_key=census_key))
+    df.columns = fields
+    df.rename(columns=clean_col, inplace=True)
+    df = df.drop(axis='index', index=0)
+
+    df.to_sql(
+        name=table,
+        con=engine,
+        schema=schema,
+        if_exists='replace',
+    )
+
+    # list names of columns
+    #list(df.iloc[0].axes[0])
+
 def main():
     user = input('user: ')
     #pw = input('password: ')
@@ -449,8 +469,9 @@ def main():
     Documentation on acs 2015 race columns:
         https://www2.census.gov/programs-surveys/acs/summary_file/2015/documentation/user_tools/ACS2015_Table_Shells.xlsx
     """
-    block_group_years = {
-        "census_2010": {
+    census_configs = [
+        {
+            "table": "census_2010",
             "url": "https://api.census.gov/data/2010/dec/sf1?get=NAME,P003001,P003002,P003003,P003004,P003005,P003006,P003007,P003008&for=block%20group:*&in=state:42&in=county:101&in=tract:*&key={census_key}",
             "fields": [
                 "Name",
@@ -468,7 +489,8 @@ def main():
                 "block_group",
             ],
         },
-        "acs_2010": {
+        {
+            "table": "acs_2010",
             "url": "https://api.census.gov/data/2010/acs/acs5?get=NAME,B00002_001E,B19013_001E,B19013_001M&for=tract:*&in=state:42&in=county:101&key={census_key}",
             "fields": [
                 "Name",
@@ -480,7 +502,8 @@ def main():
                 "tract",
             ],
         },
-        "acs_tract_2015": {
+        {
+            "table": "acs_tract_2015",
             "url": "https://api.census.gov/data/2015/acs/acs5?get=NAME,B00002_001E,B19013_001E,B19013_001M&for=tract:*&in=state:42&in=county:101&key={census_key}",
             "fields": [
                 "Name",
@@ -492,7 +515,8 @@ def main():
                 "tract",
             ],
         },
-        "acs_2015": {
+        {
+            "table": "acs_2015",
             "url": "https://api.census.gov/data/2015/acs/acs5?get=NAME,B02001_001E,B02001_002E,B02001_003E,B02001_004E,B02001_005E,B02001_006E,B02001_007E,B02001_008E&for=block%20group:*&in=state:42&in=county:101&in=tract:*&key={census_key}",
             "fields": [
                 "Name",
@@ -510,25 +534,10 @@ def main():
                 "block_group",
             ],
         },
-    }
-    for year in block_group_years:
-        print(f"Processing {year}")
-        url = block_group_years[year]['url']
-        fields = block_group_years[year]['fields']
+    ]
 
-        df = pandas.read_json(url.format(census_key=census_key))
-        # df.iloc[0] # TODO save census designations as comments on the columns
-        df.columns = fields
-        df.rename(columns=clean_col, inplace=True)
-        df = df.drop(axis='index', index=0)
-        
-        df.to_sql(
-            name=year,
-            con=engine,
-            schema='census',
-            if_exists='replace',
-        )
-
+    for census_config in tqdm(census_configs):
+        census(engine, census_schema, **census_config)
 
     # TODO add the year to the sdp shape?
     print(f'Process sdp catchment shape files...') 
