@@ -321,7 +321,6 @@ def scores(file_path, engine, mode, schema, year):
         scores_field_map = {
             "src_school_id": "school_code",
             "school_id": "school_code",
-            #"category": "group",
             "count_below_basic": "level_1_count",
             "percent_below_basic": "level_1_percent",
             "count_basic": "level_2_count",
@@ -588,7 +587,6 @@ def main():
     for census_config in tqdm(census_configs):
         census(engine, census_schema, **census_config)
 
-    # TODO add the year to the sdp shape?
     print(f'Process sdp catchment shape files...') 
     catchment_years = [
         '1617',
