@@ -369,6 +369,55 @@ def census(engine, schema: str, table: str, url: str, fields: list):
     # list names of columns
     #list(df.iloc[0].axes[0])
 
+def unzip_shape_file(year, destination_dir) -> str:
+    """
+    Unzip shape file contents
+    return path to the elementary school shapes directory
+    """
+    shape_file_zip = f"SDP_Catchment_{year}.zip"
+    shape_file_path = os.path.join(destination_dir, shape_file_zip)
+
+    # validate the existence of the shape file
+    if not os.path.isfile(shape_file_path):
+        print(f"File {shape_file_path} does not exist.")
+        return None
+
+    # unzip the file
+    unzip_dir = os.path.basename(shape_file_path).rstrip('.zip')
+    unzip_path = os.path.join(destination_dir, unzip_dir)
+    with zipfile.ZipFile(shape_file_path, 'r') as f:
+        f.extractall(unzip_path)
+
+    es_shape_file = os.path.join(
+        unzip_path,
+        f'Catchment_ES_20{year[0:2]}-{year[2:4]}',
+        f'Catchment_ES_20{year[0:2]}.shp')
+    
+    if not os.path.isfile(es_shape_file):
+        print(f"File {es_shape_file} does not exist.")
+        return None
+
+    return es_shape_file
+
+def local_shapes(file_path, schema, db, user):
+    """
+    Load a local shapefile
+    """
+    subprocess.run(
+        [
+            'ogr2ogr',
+            '-f', 'PostgreSQL',
+            f'Pg:dbname={db} host=localhost port=5432 user={user}',
+            '-lco', f'SCHEMA={schema}',
+            '-lco', 'OVERWRITE=YES',
+            '-nlt', 'PROMOTE_TO_MULTI',
+            '-t_srs', 'EPSG:2272',
+            '-lco', 'precision=NO',
+            file_path
+        ],
+        check=True,
+    )
+
 def main():
     user = input('user: ')
     #pw = input('password: ')
@@ -548,44 +597,16 @@ def main():
         '1920',
     ]
 
-    # download the zip file with everything in it
+    # download the zip file containing all shape files
     sdp_shapes_url = 'https://cdn.philasd.org/offices/performance/Open_Data/School_Information/School_Catchment/SDP_Catchment_All_Years.zip'
     sdp_data_path = os.path.join('..', 'data', 'schools')
-    sdp_shapes_path = os.path.join(sdp_data_path, os.path.basename(sdp_shapes_url))
-    urllib.request.urlretrieve(sdp_shapes_url, sdp_shapes_path)
 
-    # unzip the file with all years of shapes
-    unzip_dir = os.path.basename(sdp_shapes_url).rstrip('.zip')
-    unzip_path = os.path.join(sdp_data_path, unzip_dir)
-    with zipfile.ZipFile(sdp_shapes_path, 'r') as f:
-        f.extractall(unzip_path)
+    sdp_shape_files_path = download_unzip(sdp_shapes_url, sdp_data_path)
 
+    # process file for each year, if it exists
     for year in tqdm(catchment_years):
-
-        # extract the files for that catchment year
-        current_file_name = f'SDP_Catchment_{year}.zip'
-        current_unzip_path = os.path.join(unzip_path, current_file_name.rstrip('.zip'))
-        with zipfile.ZipFile(os.path.join(unzip_path, current_file_name)) as f:
-            f.extractall(current_unzip_path)
-        
-        # then load the shapefiles
-        subprocess.run(
-            [
-                'ogr2ogr',
-                '-f', 'PostgreSQL',
-                f'Pg:dbname={db} host=localhost port=5432 user={user}',
-                '-lco', f'SCHEMA={sdp_schema}',
-                '-lco', 'OVERWRITE=YES',
-                '-nlt', 'PROMOTE_TO_MULTI',
-                '-t_srs', 'EPSG:2272',
-                '-lco', 'precision=NO',
-                os.path.join(
-                    current_unzip_path,
-                    f'Catchment_ES_20{year[0:2]}-{year[2:4]}',
-                    f'Catchment_ES_20{year[0:2]}.shp')
-            ],
-            check=True,
-        )
+        shape_file = unzip_shape_file(year, sdp_shape_files_path)
+        local_shapes(file_path=shape_file, schema=sdp_schema, db=db, user=user)
 
     print("Processing census tract shape files...")
     # TODO consider using the ogr python interface
