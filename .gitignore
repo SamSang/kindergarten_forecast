@@ -4,9 +4,9 @@ scripts/test.py
 scripts/__pycache__
 data/schools/demog/*
 data/schools/list/*
-data/schools/SDP_Catchment_All_Years
+data/schools/SDP_Catchment_All_Years/*
 data/schools/SDP_Catchment_All_Years.zip
-data/schools/PSSA_Keystone_All_Years
+data/schools/PSSA_Keystone_All_Years/*
 data/schools/PSSA_Keystone_All_Years.zip
 data/tracts/*
 Pipfile.lock
