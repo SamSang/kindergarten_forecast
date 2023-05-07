@@ -398,26 +398,7 @@ def unzip_shape_file(year, destination_dir) -> str:
 
     return es_shape_file
 
-def local_shapes(file_path, schema, db, user):
-    """
-    Load a local shapefile
-    """
-    subprocess.run(
-        [
-            'ogr2ogr',
-            '-f', 'PostgreSQL',
-            f'Pg:dbname={db} host=localhost port=5432 user={user}',
-            '-lco', f'SCHEMA={schema}',
-            '-lco', 'OVERWRITE=YES',
-            '-nlt', 'PROMOTE_TO_MULTI',
-            '-t_srs', 'EPSG:2272',
-            '-lco', 'precision=NO',
-            file_path
-        ],
-        check=True,
-    )
-
-def remote_shapes(url, db, user, schema, sql=None, table=None):
+def shape(layer_resource, db, user, schema, sql=None, table=None):
     """
     Load shapefile from a remote
     sql is optional
@@ -433,9 +414,9 @@ def remote_shapes(url, db, user, schema, sql=None, table=None):
         "-lco", "OVERWRITE=YES",
         "-nlt", "PROMOTE_TO_MULTI",
         #"-sql", "",
-        "-t_srs", "EPSG:2272",
         #"-nln", "",
-        url,
+        "-t_srs", "EPSG:2272",
+        layer_resource,
     ]
     if sql:
         params.insert(10, "-sql")
@@ -635,23 +616,23 @@ def main():
     # process file for each year, if it exists
     for year in tqdm(catchment_years):
         shape_file = unzip_shape_file(year, sdp_shape_files_path)
-        local_shapes(file_path=shape_file, schema=sdp_schema, db=db, user=user)
+        shape(layer_resource=shape_file, schema=sdp_schema, db=db, user=user)
 
     print("Processing census shape files...")
     census_files = [
         {
-            "url": "/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_42101_tract10.zip",
+            "layer_resource": "/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/TRACT/2010/tl_2010_42101_tract10.zip",
             "sql": "select 2010 as year, tractce10 as tractce, geoid10 as geoid, name10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_tract10 where countyfp10 = '101'",
             "table": "tract",
         },
         {
-            "url": "/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/BG/2010/tl_2010_42101_bg10.zip",
+            "layer_resource": "/vsizip/vsicurl/https://www2.census.gov/geo/tiger/TIGER2010/BG/2010/tl_2010_42101_bg10.zip",
             "sql": "select 2010 as year, tractce10 as tractce, blkgrpce10 as blkgrpce, geoid10 as geoid, namelsad10 as name, aland10 as aland, awater10 as awater from tl_2010_42101_bg10 where countyfp10 = '101'",
             "table": "block_group",
         },
     ]
     for census_file in tqdm(census_files):
-        remote_shapes(db=db, user=user, schema=census_schema, **census_file)
+        shape(db=db, user=user, schema=census_schema, **census_file)
 
 if __name__ == '__main__':
     main()
